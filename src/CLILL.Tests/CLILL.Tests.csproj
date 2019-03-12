@@ -18,10 +18,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="TestPrograms\C\" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\CLILL\CLILL.csproj" />
   </ItemGroup>
 
