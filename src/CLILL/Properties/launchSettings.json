@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "ILLLC": {
+      "commandName": "Project",
+      "commandLineArgs": "",
+      "nativeDebugging": true
+    }
+  }
+}

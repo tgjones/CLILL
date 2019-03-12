@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="fibonacci.ll" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="fibonacci.ll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibLLVM" Version="7.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="LLVMSharp">
+      <HintPath>..\..\lib\LLVMSharp.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
