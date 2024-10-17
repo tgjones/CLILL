@@ -4,7 +4,7 @@ int main()
 {
    int count = 30;
    int first = 0;
-   int second = 0;
+   int second = 1;
    int value;
 
    for (int i = 0; i < count; i++ )

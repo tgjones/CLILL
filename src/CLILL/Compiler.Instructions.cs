@@ -1,79 +1,70 @@
-﻿using LLVMSharp.API;
-using LLVMSharp.API.Values;
-using LLVMSharp.API.Values.Constants;
-using LLVMSharp.API.Values.Constants.GlobalValues.GlobalObjects;
-using LLVMSharp.API.Values.Instructions;
-using LLVMSharp.API.Values.Instructions.Binary;
-using LLVMSharp.API.Values.Instructions.Cmp;
-using LLVMSharp.API.Values.Instructions.Terminator;
-using LLVMSharp.API.Values.Instructions.Unary;
-using System;
-using System.Collections.Generic;
+﻿using System;
 using System.Reflection.Emit;
+using LLVMSharp.Interop;
 
 namespace CLILL
 {
     partial class Compiler
     {
         private static void CompileInstruction(
-            Instruction instruction,
+            LLVMValueRef instruction,
             FunctionCompilationContext context)
         {
             var ilGenerator = context.ILGenerator;
 
-            switch (instruction)
+            switch (instruction.InstructionOpcode)
             {
-                case AllocaInst _:
+                case LLVMOpcode.LLVMAlloca:
                     {
-                        var operand = instruction.Operands[0];
-                        var local = ilGenerator.DeclareLocal(GetMsilType(operand.Type));
+                        var operand = instruction.GetOperand(0);
+                        var local = ilGenerator.DeclareLocal(GetMsilType(operand.TypeOf));
                         context.Locals.Add(instruction, local);
                         break;
                     }
 
-                case StoreInst _:
+                case LLVMOpcode.LLVMStore:
                     {
-                        EmitLoad(ilGenerator, instruction.Operands[0], context);
-                        EmitStloc(ilGenerator, instruction.Operands[1], context);
+                        EmitLoad(ilGenerator, instruction.GetOperand(0), context);
+                        EmitStloc(ilGenerator, instruction.GetOperand(1), context);
                         break;
                     }
 
-                case BranchInst i:
+                case LLVMOpcode.LLVMBr:
                     {
-                        if (i.IsConditional)
+                        if (instruction.IsConditional)
                         {
-                            EmitLoad(ilGenerator, i.Condition, context);
-                            ilGenerator.Emit(OpCodes.Brtrue, context.GetOrCreateLabel(instruction.Operands[2]));
-                            ilGenerator.Emit(OpCodes.Br, context.GetOrCreateLabel(instruction.Operands[1]));
+                            EmitLoad(ilGenerator, instruction.Condition, context);
+                            ilGenerator.Emit(OpCodes.Brtrue, context.GetOrCreateLabel(instruction.GetOperand(2)));
+                            ilGenerator.Emit(OpCodes.Br, context.GetOrCreateLabel(instruction.GetOperand(1)));
                         }
                         else
                         {
-                            var label = context.GetOrCreateLabel(instruction.Operands[0]);
+                            var label = context.GetOrCreateLabel(instruction.GetOperand(0));
                             ilGenerator.Emit(OpCodes.Br, label);
                         }
                         break;
                     }
 
-                case LoadInst _:
+                case LLVMOpcode.LLVMLoad:
                     {
-                        EmitLoad(ilGenerator, instruction.Operands[0], context);
+                        EmitLoad(ilGenerator, instruction.GetOperand(0), context);
                         EmitStoreResult(ilGenerator, instruction, context);
                         break;
                     }
 
-                case ICmpInst i:
+                case LLVMOpcode.LLVMICmp:
                     {
-                        EmitLoad(ilGenerator, instruction.Operands[0], context);
-                        EmitLoad(ilGenerator, instruction.Operands[1], context);
-                        switch (i.ICmpPredicate)
+                        EmitLoad(ilGenerator, instruction.GetOperand(0), context);
+                        EmitLoad(ilGenerator, instruction.GetOperand(1), context);
+                        switch (instruction.ICmpPredicate)
                         {
-                            case IntPredicate.SLE:
+                            case LLVMIntPredicate.LLVMIntSLE:
                                 ilGenerator.Emit(OpCodes.Cgt);
                                 ilGenerator.Emit(OpCodes.Ldc_I4_0);
                                 ilGenerator.Emit(OpCodes.Ceq);
                                 break;
 
-                            case IntPredicate.SLT:
+                            case LLVMIntPredicate.LLVMIntSLT:
                                 ilGenerator.Emit(OpCodes.Clt);
                                 break;
 
@@ -84,34 +75,38 @@ namespace CLILL
                         break;
                     }
 
-                case Add _:
+                case LLVMOpcode.LLVMAdd:
                     {
-                        EmitLoad(ilGenerator, instruction.Operands[0], context);
-                        EmitLoad(ilGenerator, instruction.Operands[1], context);
+                        EmitLoad(ilGenerator, instruction.GetOperand(0), context);
+                        EmitLoad(ilGenerator, instruction.GetOperand(1), context);
                         ilGenerator.Emit(OpCodes.Add);
                         EmitStoreResult(ilGenerator, instruction, context);
                         break;
                     }
 
-                case CallInst _:
+                case LLVMOpcode.LLVMCall:
                     {
                         // TODO: This is totally hardcoded to printf call.
-                        var fieldRef = instruction.Operands[0].Operands[0];
-                        ilGenerator.Emit(OpCodes.Ldsfld, context.CompilationContext.Globals[fieldRef]);
-                        EmitLoad(ilGenerator, instruction.Operands[1], context);
+                        var fieldRef = instruction.GetOperand(0);
+                        var staticField = context.CompilationContext.Globals[fieldRef];
+                        ilGenerator.Emit(OpCodes.Ldsfld, staticField);
+                        ilGenerator.Emit(OpCodes.Ldc_I4_0);
+                        ilGenerator.Emit(OpCodes.Ldelema, staticField.FieldType.GetElementType());
+                        ilGenerator.Emit(OpCodes.Conv_U);
+                        EmitLoad(ilGenerator, instruction.GetOperand(1), context);
                         ilGenerator.EmitCall(
                             OpCodes.Call,
-                            GetOrCreateMethod((Function)instruction.Operands[2], context.CompilationContext), 
+                            GetOrCreateMethod(instruction.GetOperand(2), context.CompilationContext), 
                             new[] { typeof(int) });
                         ilGenerator.Emit(OpCodes.Pop);
                         break;
                     }
 
-                case ReturnInst _:
+                case LLVMOpcode.LLVMRet:
                     {
-                        if (instruction.Operands.Count > 0)
+                        if (instruction.OperandCount > 0)
                         {
-                            var returnOperand = instruction.Operands[0];
+                            var returnOperand = instruction.GetOperand(0);
                             EmitLoad(ilGenerator, returnOperand, context);
                         }
                         ilGenerator.Emit(OpCodes.Ret);
@@ -125,14 +120,15 @@ namespace CLILL
 
         private static void EmitLoad(
             ILGenerator ilGenerator,
-            Value valueRef,
+            LLVMValueRef valueRef,
             FunctionCompilationContext context)
         {
-            if (valueRef is Constant c)
+            if (valueRef.IsConstant)
             {
-                if (valueRef is ConstantInt i)
+                var constantInt = valueRef.IsAConstantInt;
+                if (constantInt.Handle != IntPtr.Zero)
                 {
-                    ilGenerator.Emit(OpCodes.Ldc_I4, (int)i.SExtValue);
+                    ilGenerator.Emit(OpCodes.Ldc_I4, (int)constantInt.ConstIntSExt);
                 }
                 else
                 {
@@ -148,17 +144,17 @@ namespace CLILL
 
         private static void EmitStoreResult(
             ILGenerator ilGenerator, 
-            Value instruction, 
+            LLVMValueRef instruction, 
             FunctionCompilationContext context)
         {
-            var local = ilGenerator.DeclareLocal(GetMsilType(instruction.Type));
+            var local = ilGenerator.DeclareLocal(GetMsilType(instruction.TypeOf));
             context.Locals.Add(instruction, local);
             EmitStloc(ilGenerator, instruction, context);
         }
 
         private static void EmitStloc(
-            ILGenerator ilGenerator, 
-            Value valueRef, 
+            ILGenerator ilGenerator,
+            LLVMValueRef valueRef, 
             FunctionCompilationContext context)
         {
             var local = context.Locals[valueRef];

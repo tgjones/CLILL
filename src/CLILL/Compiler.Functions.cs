@@ -1,17 +1,16 @@
-﻿using LLVMSharp.API;
-using LLVMSharp.API.Values.Constants.GlobalValues.GlobalObjects;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
+using LLVMSharp.Interop;
 
 namespace CLILL
 {
     partial class Compiler
     {
-        private static MethodInfo GetOrCreateMethod(Function function, CompilationContext context)
+        private static unsafe MethodInfo GetOrCreateMethod(LLVMValueRef function, CompilationContext context)
         {
             if (!context.Functions.TryGetValue(function, out var method))
             {
@@ -20,12 +19,15 @@ namespace CLILL
                 {
                     // TODO: We assume all extern function are part of C runtime.
                     // That isn't generally true...
+
+                    var functionType = (LLVMTypeRef)LLVM.GlobalGetValueType(function);
+                    
                     method = CreateExternMethod(
                         context,
                         function.Name,
-                        function.FunctionType.IsVarArg ? CallingConventions.VarArgs : CallingConventions.Standard,
-                        GetMsilType(function.FunctionType.ReturnType),
-                        function.FunctionType.ParamTypes.Select(GetMsilType).ToArray());
+                        functionType.IsFunctionVarArg ? CallingConventions.VarArgs : CallingConventions.Standard,
+                        GetMsilType(functionType.ReturnType),
+                        functionType.ParamTypes.Select(GetMsilType).ToArray());
                 }
                 else
                 {
@@ -38,18 +40,15 @@ namespace CLILL
             return method;
         }
 
-        private static MethodInfo CompileMethod(Function function, CompilationContext context)
+        private static unsafe MethodBuilder CompileMethod(LLVMValueRef function, CompilationContext context)
         {
+            var functionType = (LLVMTypeRef)LLVM.GlobalGetValueType(function);
+
             var methodBuilder = context.TypeBuilder.DefineMethod(
                 function.Name,
                 MethodAttributes.Static | MethodAttributes.Public, // TODO
-                GetMsilType(function.FunctionType.ReturnType),
-                Array.Empty<System.Type>()); // TODO: parameters
-
-            if (function.Name == "main")
-            {
-                context.AssemblyBuilder.SetEntryPoint(methodBuilder);
-            }
+                GetMsilType(functionType.ReturnType),
+                []); // TODO: parameters
 
             var ilGenerator = methodBuilder.GetILGenerator();
 
@@ -57,12 +56,15 @@ namespace CLILL
 
             foreach (var basicBlock in function.BasicBlocks)
             {
-                var basicBlockLabel = functionCompilationContext.GetOrCreateLabel(basicBlock);
+                var basicBlockLabel = functionCompilationContext.GetOrCreateLabel(basicBlock.AsValue());
                 ilGenerator.MarkLabel(basicBlockLabel);
 
-                foreach (var instruction in basicBlock.Instructions)
+                var instruction = basicBlock.FirstInstruction;
+                while (instruction.Handle != IntPtr.Zero)
                 {
                     CompileInstruction(instruction, functionCompilationContext);
+                    instruction = instruction.NextInstruction;
+
                 }
             }
 
@@ -75,8 +77,8 @@ namespace CLILL
 
             public readonly ILGenerator ILGenerator;
 
-            public readonly Dictionary<Value, LocalBuilder> Locals = new Dictionary<Value, LocalBuilder>();
-            public readonly Dictionary<Value, Label> Labels = new Dictionary<Value, Label>();
+            public readonly Dictionary<LLVMValueRef, LocalBuilder> Locals = new Dictionary<LLVMValueRef, LocalBuilder>();
+            public readonly Dictionary<LLVMValueRef, Label> Labels = new Dictionary<LLVMValueRef, Label>();
 
             public FunctionCompilationContext(
                 CompilationContext compilationContext,
@@ -86,7 +88,7 @@ namespace CLILL
                 ILGenerator = ilGenerator;
             }
 
-            public Label GetOrCreateLabel(Value valueRef)
+            public Label GetOrCreateLabel(LLVMValueRef valueRef)
             {
                 if (!Labels.TryGetValue(valueRef, out var result))
                 {
@@ -96,7 +98,7 @@ namespace CLILL
             }
         }
 
-        private static MethodInfo CreateExternMethod(
+        private static MethodBuilder CreateExternMethod(
             CompilationContext context,
             string name,
             CallingConventions callingConventions,

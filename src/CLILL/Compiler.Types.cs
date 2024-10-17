@@ -1,17 +1,16 @@
-﻿using LLVMSharp.API.Types;
-using LLVMSharp.API.Types.Composite.SequentialTypes;
-using System;
+﻿using System;
+using LLVMSharp.Interop;
 
 namespace CLILL
 {
     partial class Compiler
     {
-        private static Type GetMsilType(LLVMSharp.API.Type typeRef)
+        private static Type GetMsilType(LLVMTypeRef typeRef)
         {
-            switch (typeRef)
+            switch (typeRef.Kind)
             {
-                case IntegerType t:
-                    var intTypeWidth = t.BitWidth;
+                case LLVMTypeKind.LLVMIntegerTypeKind:
+                    var intTypeWidth = typeRef.IntWidth;
                     switch (intTypeWidth)
                     {
                         case 1:
@@ -25,17 +24,14 @@ namespace CLILL
                             throw new NotImplementedException();
                     }
 
-                case VoidType _:
+                case LLVMTypeKind.LLVMVoidTypeKind:
                     return typeof(void);
 
-                case PointerType t:
-                    var elementType = GetMsilType(t.ElementType);
-                    return elementType.IsArray
-                        ? elementType
-                        : elementType.MakeArrayType();
+                case LLVMTypeKind.LLVMPointerTypeKind:
+                    return typeof(IntPtr);
 
-                case ArrayType t:
-                    return GetMsilType(t.ElementType).MakeArrayType();
+                case LLVMTypeKind.LLVMArrayTypeKind:
+                    return GetMsilType(typeRef.ElementType).MakeArrayType();
 
                 default:
                     throw new NotImplementedException();
