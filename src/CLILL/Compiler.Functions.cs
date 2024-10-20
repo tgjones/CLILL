@@ -52,23 +52,80 @@ namespace CLILL
 
             var ilGenerator = methodBuilder.GetILGenerator();
 
-            var functionCompilationContext = new FunctionCompilationContext(context, ilGenerator);
+            // Figure out which instructions need their results stored in local variables,
+            // and which can be pushed to the stack.
+            var canPushToStackLookup = new Dictionary<LLVMValueRef, bool>();
+            foreach (var basicBlock in function.BasicBlocks)
+            {
+                var blockInstructions = basicBlock.GetInstructions().ToList();
+                for (var i = 0; i < blockInstructions.Count; i++)
+                {
+                    canPushToStackLookup.Add(blockInstructions[i], CanPushToStack(blockInstructions, i));
+                }
+            }
+
+            var functionCompilationContext = new FunctionCompilationContext(context, ilGenerator, canPushToStackLookup);
 
             foreach (var basicBlock in function.BasicBlocks)
             {
                 var basicBlockLabel = functionCompilationContext.GetOrCreateLabel(basicBlock.AsValue());
                 ilGenerator.MarkLabel(basicBlockLabel);
 
-                var instruction = basicBlock.FirstInstruction;
-                while (instruction.Handle != IntPtr.Zero)
+                foreach (var instruction in basicBlock.GetInstructions())
                 {
-                    CompileInstruction(instruction, functionCompilationContext);
-                    instruction = instruction.NextInstruction;
-
+                    if (!functionCompilationContext.CanPushToStackLookup[instruction])
+                    {
+                        CompileInstruction(instruction, functionCompilationContext);
+                    }
                 }
             }
 
             return methodBuilder;
+        }
+
+        private static bool CanPushToStack(List<LLVMValueRef> instructions, int index)
+        {
+            var instruction = instructions[index];
+            var users = instruction.GetUses().ToList();
+
+            if (users.Count != 1)
+            {
+                return false;
+            }
+
+            var user = users[0];
+
+            // If it's used in a different block from where it's executed,
+            // we can't push it to the stack because we can't guarantee the
+            // order of execution. (With more effort we perhaps could.)
+            if (user.InstructionParent != instruction.InstructionParent)
+            {
+                return false;
+            }
+
+            if (instruction.InstructionOpcode == LLVMOpcode.LLVMLoad)
+            {
+                // Make sure the result of this load instruction is used
+                // before anything that might change its value.
+                for (var j = index + 1; j < instructions.Count; j++)
+                {
+                    if (instructions[j] == user)
+                    {
+                        return true;
+                    }
+                    if (!instructions[j].HasNoSideEffects())
+                    {
+                        return false;
+                    }
+                }
+                throw new InvalidOperationException("Shouldn't be here");
+            }
+            else if (instruction.HasNoSideEffects())
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private sealed class FunctionCompilationContext
@@ -77,15 +134,19 @@ namespace CLILL
 
             public readonly ILGenerator ILGenerator;
 
+            public readonly Dictionary<LLVMValueRef, bool> CanPushToStackLookup;
+
             public readonly Dictionary<LLVMValueRef, LocalBuilder> Locals = new Dictionary<LLVMValueRef, LocalBuilder>();
             public readonly Dictionary<LLVMValueRef, Label> Labels = new Dictionary<LLVMValueRef, Label>();
 
             public FunctionCompilationContext(
                 CompilationContext compilationContext,
-                ILGenerator ilGenerator)
+                ILGenerator ilGenerator,
+                Dictionary<LLVMValueRef, bool> canPushToStackLookup)
             {
                 CompilationContext = compilationContext;
                 ILGenerator = ilGenerator;
+                CanPushToStackLookup = canPushToStackLookup;
             }
 
             public Label GetOrCreateLabel(LLVMValueRef valueRef)

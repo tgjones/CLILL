@@ -10,6 +10,18 @@ namespace CLILL
             LLVMValueRef instruction,
             FunctionCompilationContext context)
         {
+            var needsToSaveLocal = CompileInstructionValue(instruction, context);
+
+            if (needsToSaveLocal)
+            {
+                EmitStoreResult(context.ILGenerator, instruction, context);
+            }
+        }
+
+        private static bool CompileInstructionValue(
+            LLVMValueRef instruction,
+            FunctionCompilationContext context)
+        {
             var ilGenerator = context.ILGenerator;
 
             switch (instruction.InstructionOpcode)
@@ -33,9 +45,36 @@ namespace CLILL
                     {
                         if (instruction.IsConditional)
                         {
-                            EmitLoad(ilGenerator, instruction.Condition, context);
-                            ilGenerator.Emit(OpCodes.Brtrue, context.GetOrCreateLabel(instruction.GetOperand(2)));
-                            ilGenerator.Emit(OpCodes.Br, context.GetOrCreateLabel(instruction.GetOperand(1)));
+                            var condition = instruction.Condition;
+                            if (context.CanPushToStackLookup[condition]
+                                && condition.InstructionOpcode == LLVMOpcode.LLVMICmp)
+                            {
+                                switch (condition.ICmpPredicate)
+                                {
+                                    case LLVMIntPredicate.LLVMIntSLT:
+                                        EmitLoad(ilGenerator, condition.GetOperand(0), context);
+                                        EmitLoad(ilGenerator, condition.GetOperand(1), context);
+                                        ilGenerator.Emit(OpCodes.Blt, context.GetOrCreateLabel(instruction.GetOperand(2)));
+                                        ilGenerator.Emit(OpCodes.Br, context.GetOrCreateLabel(instruction.GetOperand(1)));
+                                        break;
+
+                                    case LLVMIntPredicate.LLVMIntSLE:
+                                        EmitLoad(ilGenerator, condition.GetOperand(0), context);
+                                        EmitLoad(ilGenerator, condition.GetOperand(1), context);
+                                        ilGenerator.Emit(OpCodes.Ble, context.GetOrCreateLabel(instruction.GetOperand(2)));
+                                        ilGenerator.Emit(OpCodes.Br, context.GetOrCreateLabel(instruction.GetOperand(1)));
+                                        break;
+
+                                    default:
+                                        throw new InvalidOperationException();
+                                }
+                            }
+                            else
+                            {
+                                EmitLoad(ilGenerator, condition, context);
+                                ilGenerator.Emit(OpCodes.Brtrue, context.GetOrCreateLabel(instruction.GetOperand(2)));
+                                ilGenerator.Emit(OpCodes.Br, context.GetOrCreateLabel(instruction.GetOperand(1)));
+                            }
                         }
                         else
                         {
@@ -48,7 +87,7 @@ namespace CLILL
                 case LLVMOpcode.LLVMLoad:
                     {
                         EmitLoad(ilGenerator, instruction.GetOperand(0), context);
-                        EmitStoreResult(ilGenerator, instruction, context);
+                        return true;
                         break;
                     }
 
@@ -71,7 +110,7 @@ namespace CLILL
                             default:
                                 throw new NotImplementedException();
                         }
-                        EmitStoreResult(ilGenerator, instruction, context);
+                        return true;
                         break;
                     }
 
@@ -80,7 +119,7 @@ namespace CLILL
                         EmitLoad(ilGenerator, instruction.GetOperand(0), context);
                         EmitLoad(ilGenerator, instruction.GetOperand(1), context);
                         ilGenerator.Emit(OpCodes.Add);
-                        EmitStoreResult(ilGenerator, instruction, context);
+                        return true;
                         break;
                     }
 
@@ -116,6 +155,8 @@ namespace CLILL
                 default:
                     throw new NotImplementedException();
             }
+
+            return false;
         }
 
         private static void EmitLoad(
@@ -135,10 +176,18 @@ namespace CLILL
                     throw new NotImplementedException();
                 }
             }
-            else
+            else if (context.Locals.ContainsKey(valueRef))
             {
                 var local = context.Locals[valueRef];
                 ilGenerator.Emit(OpCodes.Ldloc, local);
+            }
+            else if (context.CanPushToStackLookup[valueRef])
+            {
+                CompileInstructionValue(valueRef, context);
+            }
+            else
+            {
+                throw new InvalidOperationException();
             }
         }
 
