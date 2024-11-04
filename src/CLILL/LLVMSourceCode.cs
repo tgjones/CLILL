@@ -6,7 +6,7 @@ namespace CLILL
 {
     public sealed unsafe class LLVMSourceCode : IDisposable
     {
-        internal readonly LLVMMemoryBufferRef MemoryBuffer;
+        public readonly LLVMMemoryBufferRef MemoryBuffer;
 
         private LLVMSourceCode(LLVMMemoryBufferRef memoryBuffer)
         {
