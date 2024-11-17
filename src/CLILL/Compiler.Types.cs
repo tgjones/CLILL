@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using LLVMSharp.Interop;
 
@@ -12,10 +13,13 @@ namespace CLILL
             switch (typeRef.Kind)
             {
                 case LLVMTypeKind.LLVMArrayTypeKind:
-                    return GetMsilType(typeRef.ElementType, context).MakePointerType();
+                    return context.ArrayTypes.GetOrAdd(typeRef, x => CreateArrayType(x, context));
 
                 case LLVMTypeKind.LLVMDoubleTypeKind:
                     return typeof(double);
+
+                case LLVMTypeKind.LLVMFloatTypeKind:
+                    return typeof(float);
 
                 case LLVMTypeKind.LLVMIntegerTypeKind:
                     var intTypeWidth = typeRef.IntWidth;
@@ -28,11 +32,14 @@ namespace CLILL
                         case 8:
                             return typeof(byte);
 
+                        case 16:
+                            return typeof(short);
+
                         case 64:
                             return typeof(long);
 
                         default:
-                            throw new NotImplementedException();
+                            throw new NotImplementedException($"Integer width {intTypeWidth} not implemented: {typeRef}");
                     }
 
                 case LLVMTypeKind.LLVMPointerTypeKind:
@@ -62,9 +69,12 @@ namespace CLILL
             {
                 throw new InvalidOperationException();
             }
-            switch (typeRef.VectorSize)
+            switch ((context.GetSizeOfTypeInBytes(typeRef.ElementType), typeRef.VectorSize))
             {
-                case 4:
+                case (1, 4):
+                    return CreateArrayOrVectorType(typeRef, context, (int)typeRef.VectorSize);
+
+                case (4, 4):
                     return typeof(Vector128<>).MakeGenericType(GetMsilType(typeRef.ElementType, context));
 
                 default:
@@ -103,6 +113,42 @@ namespace CLILL
             //}
 
             return builtType;
+        }
+
+        private static Type CreateArrayType(LLVMTypeRef arrayTypeRef, CompilationContext context)
+        {
+            return CreateArrayOrVectorType(arrayTypeRef, context, (int)arrayTypeRef.ArrayLength);
+        }
+
+        private static Type CreateArrayOrVectorType(
+            LLVMTypeRef arrayOrVectorTypeRef, 
+            CompilationContext context,
+            int length)
+        {
+            var elementType = GetMsilType(arrayOrVectorTypeRef.ElementType, context);
+
+            if (elementType.IsPointer)
+            {
+                elementType = typeof(IntPtr);
+            }
+
+            var structType = context.ModuleBuilder.DefineType(
+                $"Array_{elementType.Name}_{length}",
+                TypeAttributes.Public | TypeAttributes.SequentialLayout,
+                typeof(ValueType));
+
+            var customAttributeBuilder = new System.Reflection.Emit.CustomAttributeBuilder(
+                typeof(InlineArrayAttribute).GetConstructor([typeof(int)]),
+                [length]);
+
+            structType.SetCustomAttribute(customAttributeBuilder);
+
+            structType.DefineField(
+                $"_element0",
+                elementType,
+                FieldAttributes.Private);
+
+            return structType.CreateType();
         }
     }
 }

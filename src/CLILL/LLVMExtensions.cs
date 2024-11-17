@@ -50,16 +50,17 @@ internal static class LLVMExtensions
         }
     }
 
-    public static unsafe IEnumerable<LLVMValueRef> GetOperands(this LLVMValueRef instruction)
+    public static unsafe IEnumerable<LLVMValueRef> GetOperands(this LLVMValueRef value)
     {
-        if (instruction.Kind != LLVMValueKind.LLVMInstructionValueKind)
+        if (value.Kind != LLVMValueKind.LLVMInstructionValueKind
+            && value.Kind != LLVMValueKind.LLVMConstantExprValueKind)
         {
-            throw new ArgumentException("Not an instruction", nameof(instruction));
+            throw new ArgumentException("Not an instruction", nameof(value));
         }
 
-        for (var i = 0u; i < instruction.OperandCount; i++)
+        for (var i = 0u; i < value.OperandCount; i++)
         {
-            yield return instruction.GetOperand(i);
+            yield return value.GetOperand(i);
         }
     }
 
@@ -72,6 +73,24 @@ internal static class LLVMExtensions
         }
 
         return (LLVMTypeRef)LLVM.GetAllocatedType(instruction);
+    }
+
+    public static unsafe int[] GetShuffleVectorMaskValues(this LLVMValueRef instruction)
+    {
+        if (instruction.Kind != LLVMValueKind.LLVMInstructionValueKind
+            || instruction.InstructionOpcode != LLVMOpcode.LLVMShuffleVector)
+        {
+            throw new ArgumentException("Not a shufflevector instruction", nameof(instruction));
+        }
+
+        var result = new int[LLVM.GetNumMaskElements(instruction)];
+
+        for (var i = 0u; i < result.Length; i++)
+        {
+            result[i] = LLVM.GetMaskValue(instruction, i);
+        }
+
+        return result;
     }
 
     public static LLVMValueRef GetIncomingValueForBlock(this LLVMValueRef instruction, LLVMBasicBlockRef basicBlock)
@@ -103,13 +122,18 @@ internal static class LLVMExtensions
         switch (value.Kind)
         {
             case LLVMValueKind.LLVMArgumentValueKind:
+            case LLVMValueKind.LLVMConstantDataVectorValueKind:
             case LLVMValueKind.LLVMConstantIntValueKind:
+            case LLVMValueKind.LLVMConstantPointerNullValueKind:
                 return true;
+
+            case LLVMValueKind.LLVMGlobalVariableValueKind:
+                return false;
         }
 
         if (value.Kind != LLVMValueKind.LLVMInstructionValueKind)
         {
-            throw new ArgumentException($"Unexpected value kind {value.Kind}", nameof(value));
+            throw new ArgumentException($"Unexpected value kind {value.Kind}: {value}", nameof(value));
         }
 
         return value.InstructionOpcode switch

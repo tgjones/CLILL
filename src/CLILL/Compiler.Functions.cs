@@ -11,11 +11,13 @@ namespace CLILL
 {
     partial class Compiler
     {
-        private static unsafe MethodInfo GetOrCreateMethod(LLVMValueRef function, CompilationContext context)
+        private unsafe MethodInfo GetOrCreateMethod(LLVMValueRef function, CompilationContext context)
         {
             if (!context.Functions.TryGetValue(function, out var method))
             {
-                if (function.IsDeclaration && !function.Name.StartsWith("llvm.memcpy"))
+                if (function.IsDeclaration 
+                    && !function.Name.StartsWith("llvm.memcpy")
+                    && !function.Name.StartsWith("llvm.memset"))
                 {
                     switch (function.Name)
                     {
@@ -40,6 +42,8 @@ namespace CLILL
                 else
                 {
                     method = CompileMethod(function, context);
+
+                    _methodsToCompile.Enqueue((function, method));
                 }
 
                 context.Functions.Add(function, method);
@@ -59,12 +63,19 @@ namespace CLILL
                 parameterTypes[i] = GetMsilType(parameters[i].TypeOf, context);
             }
 
-            var methodBuilder = context.TypeBuilder.DefineMethod(
+            return context.TypeBuilder.DefineMethod(
                 function.Name,
                 MethodAttributes.Static | MethodAttributes.Public, // TODO
+                functionType.IsFunctionVarArg ? CallingConventions.VarArgs : CallingConventions.Standard,
                 GetMsilType(functionType.ReturnType, context),
                 parameterTypes);
+        }
 
+        private unsafe MethodBuilder CompileMethodBody(
+            LLVMValueRef function, 
+            MethodBuilder methodBuilder,
+            CompilationContext context)
+        {
             var ilGenerator = methodBuilder.GetILGenerator();
 
             if (function.Name == "llvm.memcpy.p0.p0.i64")
@@ -74,6 +85,19 @@ namespace CLILL
                 ilGenerator.Emit(OpCodes.Ldarg_2);
                 ilGenerator.Emit(OpCodes.Conv_U);
                 ilGenerator.Emit(OpCodes.Call, typeof(NativeMemory).GetMethod("Copy"));
+                ilGenerator.Emit(OpCodes.Ret);
+                return methodBuilder;
+            }
+
+            if (function.Name == "llvm.memset.p0.i64")
+            {
+                // declare void @llvm.memset.p0.i64(ptr <dest>, i8 <val>, i64<len>, i1<isvolatile>)
+                // public static void Fill (void* ptr, UIntPtr byteCount, byte value);
+                ilGenerator.Emit(OpCodes.Ldarg_0);
+                ilGenerator.Emit(OpCodes.Ldarg_2);
+                ilGenerator.Emit(OpCodes.Conv_U);
+                ilGenerator.Emit(OpCodes.Ldarg_1);
+                ilGenerator.Emit(OpCodes.Call, typeof(NativeMemory).GetMethod("Fill"));
                 ilGenerator.Emit(OpCodes.Ret);
                 return methodBuilder;
             }
@@ -92,15 +116,11 @@ namespace CLILL
 
             var functionCompilationContext = new FunctionCompilationContext(context, ilGenerator, canPushToStackLookup);
 
-            for (var i = 0; i < parameters.Length; i++)
+            for (var i = 0; i < function.Params.Length; i++)
             {
-                var parameter = parameters[i];
+                var parameter = function.Params[i];
 
                 var parameterName = parameter.Name;
-                //if (parameterName == "this")
-                //{
-                //    parameterName = "this_";
-                //}
 
                 var parameterBuilder = methodBuilder.DefineParameter(
                     i + 1,
@@ -132,7 +152,7 @@ namespace CLILL
 
                 foreach (var instruction in basicBlock.GetInstructions())
                 {
-                    if (!functionCompilationContext.CanPushToStackLookup[instruction]
+                    if (!functionCompilationContext.CanPushToStack(instruction)
                         && instruction.InstructionOpcode != LLVMOpcode.LLVMPHI)
                     {
                         CompileInstruction(instruction, functionCompilationContext);
@@ -194,7 +214,7 @@ namespace CLILL
 
             public readonly ILGenerator ILGenerator;
 
-            public readonly Dictionary<LLVMValueRef, bool> CanPushToStackLookup;
+            private readonly Dictionary<LLVMValueRef, bool> CanPushToStackLookup;
 
             public readonly Dictionary<LLVMValueRef, ParameterBuilder> Parameters = [];
             public readonly Dictionary<LLVMValueRef, LocalBuilder> Locals = [];
@@ -220,6 +240,11 @@ namespace CLILL
                 }
                 return result;
             }
+
+            public bool CanPushToStack(LLVMValueRef valueRef)
+            {
+                return CanPushToStackLookup.TryGetValue(valueRef, out var value) && value;
+            }
         }
 
         private static MethodBuilder CreateExternMethod(
@@ -231,7 +256,7 @@ namespace CLILL
         {
             var methodInfo = context.TypeBuilder.DefinePInvokeMethod(
                 name,
-                "msvcr120.dll",
+                "ucrtbase.dll",
                 MethodAttributes.Private | MethodAttributes.HideBySig | MethodAttributes.Static,
                 callingConventions,
                 returnType,

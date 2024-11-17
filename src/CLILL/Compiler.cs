@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -13,6 +15,8 @@ namespace CLILL
     public sealed partial class Compiler : IDisposable
     {
         private readonly LLVMContextRef _context;
+
+        private readonly Queue<(LLVMValueRef, MethodBuilder)> _methodsToCompile = new();
 
         public Compiler()
         {
@@ -66,6 +70,19 @@ namespace CLILL
                 }
 
                 function = function.NextFunction;
+            }
+
+            while (_methodsToCompile.Count > 0)
+            {
+                var (functionToCompile, methodToCompile) = _methodsToCompile.Dequeue();
+
+                // TODO: Better way to know we've already compiled the method body.
+                if (methodToCompile.GetILGenerator().ILOffset != 0)
+                {
+                    continue;
+                }
+
+                CompileMethodBody(functionToCompile, methodToCompile, compilationContext);
             }
 
             typeBuilder.CreateType();

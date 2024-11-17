@@ -5,7 +5,7 @@
 void example(const char *header, const char **words, size_t num_words)
 {
     size_t message_len = strlen(header) + 1; /* + 1 for terminating NULL */
-    char *message = (char*) malloc(message_len);
+    char *message = (char*) calloc(message_len, 1);
     strncat(message, header, message_len);
 
     for(int i = 0; i < num_words; ++i)
