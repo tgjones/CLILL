@@ -24,47 +24,14 @@ namespace CLILL.Tests
                    select new object[] { testFile, optimizationLevel };
         }
 
-        private static IEnumerable<object[]> TestDataArbitrary()
-        {
-            return TestFiles(Directory
-                .GetFiles(Path.Combine("TestPrograms", "arbitrary"), "*.*", SearchOption.AllDirectories));
-        }
-
-        private static IEnumerable<object[]> TestDataCTestSuite()
-        {
-            return TestFiles(Directory
-                .GetFiles(Path.Combine("TestPrograms", "c-testsuite"), "*.c", SearchOption.AllDirectories)
-                .Where(x =>
-                {
-                    switch (Path.GetFileNameWithoutExtension(x))
-                    {
-                        // These tests are not supported on Windows because they use `extern int printf(...)`
-                        // which isn't compatible with Microsoft's C runtime.
-                        case "00210":
-                        case "00211":
-                        case "00213":
-                        case "00214":
-                        case "00215":
-                        case "00217":
-                        case "00218":
-                            return false;
-
-                        // These tests are not supported on Windows because they produce different
-                        // output than the expected output.
-                        case "00212":
-                        case "00216":
-                            return false;
-
-                        default:
-                            return true;
-                    }
-                }));
-        }
-
         public static string TestDataDisplayName(MethodInfo methodInfo, object[] values)
         {
             return $"{methodInfo.Name}({Path.GetFileName((string)values[0])}, {values[1]})";
         }
+
+        private static IEnumerable<object[]> TestDataArbitrary() => TestFiles(
+            Directory
+            .GetFiles(Path.Combine("TestPrograms", "arbitrary"), "*.*", SearchOption.AllDirectories));
 
         [TestMethod]
         [DynamicData(nameof(TestDataArbitrary), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
@@ -96,6 +63,22 @@ namespace CLILL.Tests
             Console.WriteLine($"Stdout: {managedStandardOutput}");
         }
 
+        private static IEnumerable<object[]> TestDataCTestSuite() => TestFiles(
+            Directory
+            .GetFiles(Path.Combine("TestPrograms", "c-testsuite"), "*.c", SearchOption.AllDirectories)
+            .Where(x => Path.GetFileNameWithoutExtension(x) switch
+            {
+                // These tests are not supported on Windows because they use `extern int printf(...)`
+                // which isn't compatible with Microsoft's C runtime.
+                "00210" or "00211" or "00213" or "00214" or "00215" or "00217" or "00218" => false,
+
+                // These tests are not supported on Windows because they produce different
+                // output than the expected output.
+                "00212" or "00216" => false,
+
+                _ => true,
+            }));
+
         [TestMethod]
         [DynamicData(nameof(TestDataCTestSuite), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
         public void CTestSuite(string testName, string optimizationLevel)
@@ -118,59 +101,51 @@ namespace CLILL.Tests
             Console.WriteLine($"Stdout: {managedStandardOutput}");
         }
 
-        //[TestMethod]
-        //[DataRow("O0")]
-        //[DataRow("O3")]
-        //public void BenchmarkMandelbrot(string optimizationLevel)
-        //{
-        //    var sourceFilePath = Path.Combine(Environment.CurrentDirectory, "TestPrograms", "mandelbrot", "benchmarks.c");
+        private static IEnumerable<object[]> TestDataBenchmarks() => TestFiles(
+            Directory
+            .GetFiles(Path.Combine("TestPrograms", "benchmarks"), "*.*", SearchOption.AllDirectories));
 
-        //    var fullTestName = $"{Path.GetFileNameWithoutExtension(sourceFilePath)}_{optimizationLevel}";
+        [TestMethod]
+        [DataRow("Mandelbrot", "O0")]
+        [DataRow("Mandelbrot", "O3")]
+        public void Benchmark(string benchmark, string optimizationLevel)
+        {
+            var testName = Path.Combine("TestPrograms", "benchmarks", "benchmarks.c");
 
-        //    var irPath = fullTestName + ".ll";
-        //    var binaryPath = fullTestName + "_native.exe";
+            string[] extraClangArgs = [$"-DBENCHMARK_{benchmark.ToUpperInvariant()}"];
+            var managedExePath = CompileManaged(testName, optimizationLevel, extraClangArgs);
 
-        //    // Compile to LLVM IR.
-        //    RunClang([sourceFilePath, "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}"]);
+            // Compile to executable binary.
+            var binaryPath = GetFullTestName(testName, optimizationLevel) + "_native.exe";
+            RunClang([GetSourceFilePath(testName), "-o", binaryPath, $"-{optimizationLevel}", ..extraClangArgs]);
 
-        //    // Compile to executable binary.
-        //    RunClang([sourceFilePath, "-o", binaryPath, $"-{optimizationLevel}"]);
+            var stopwatch = Stopwatch.StartNew();
 
-        //    var outputPath = $"{fullTestName}.exe";
+            RunProgram(
+                "dotnet",
+                [managedExePath],
+                out var managedExitCode,
+                out var managedStandardOutput,
+                out var managedStandardError);
 
-        //    using (var compiler = new Compiler())
-        //    using (var source = LLVMSourceCode.FromFile(irPath))
-        //    {
-        //        compiler.Compile(source, outputPath);
-        //    }
+            Console.WriteLine($"Managed: {stopwatch.Elapsed}");
 
-        //    var stopwatch = Stopwatch.StartNew();
+            stopwatch.Restart();
 
-        //    RunProgram(
-        //        "dotnet",
-        //        [outputPath],
-        //        out var managedExitCode,
-        //        out var managedStandardOutput,
-        //        out var managedStandardError);
+            RunProgram(
+                binaryPath,
+                [],
+                out var llvmExitCode,
+                out var llvmStandardOutput,
+                out var llvmStandardError);
 
-        //    Console.WriteLine($"Managed: {stopwatch.Elapsed}");
+            Console.WriteLine($"Native:  {stopwatch.Elapsed}");
 
-        //    stopwatch.Restart();
+            Assert.AreEqual(llvmExitCode, managedExitCode, managedStandardError);
+            Assert.AreEqual(llvmStandardOutput, managedStandardOutput);
 
-        //    RunProgram(
-        //        binaryPath,
-        //        [],
-        //        out var llvmExitCode,
-        //        out var llvmStandardOutput,
-        //        out var llvmStandardError);
-
-        //    Console.WriteLine($"Native:  {stopwatch.Elapsed}");
-
-        //    Assert.AreEqual(llvmExitCode, managedExitCode, managedStandardError);
-
-        //    Console.WriteLine($"Managed Stdout: {managedStandardOutput}");
-        //    Console.WriteLine($"Native  Stdout: {llvmStandardOutput}");
-        //}
+            Console.WriteLine($"Stdout: {managedStandardOutput}");
+        }
 
         private static string GetFullTestName(string testName, string optimizationLevel) => $"{testName}_{optimizationLevel}";
 
@@ -183,19 +158,44 @@ namespace CLILL.Tests
             out string managedStandardOutput,
             out string managedStandardError)
         {
+            var outputPath = CompileManaged(
+                testName, 
+                optimizationLevel);
+
+            ExecuteManaged(
+                outputPath,
+                out managedExitCode,
+                out managedStandardOutput,
+                out managedStandardError);
+        }
+
+        private static string CompileManaged(
+            string testName,
+            string optimizationLevel,
+            string[] extraClangArgs = null)
+        {
             var fullTestName = GetFullTestName(testName, optimizationLevel);
 
             var irPath = fullTestName + ".ll";
 
             // Compile to LLVM IR.
-            RunClang([GetSourceFilePath(testName), "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}"]);
+            RunClang([GetSourceFilePath(testName), "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}", ..extraClangArgs]);
 
             var outputPath = $"{fullTestName}.exe";
             Compiler.Compile(irPath, outputPath);
 
+            return outputPath;
+        }
+
+        private static void ExecuteManaged(
+            string managedExePath,
+            out int managedExitCode,
+            out string managedStandardOutput,
+            out string managedStandardError)
+        {
             RunProgram(
                 "dotnet",
-                [outputPath],
+                [managedExePath],
                 out managedExitCode,
                 out managedStandardOutput,
                 out managedStandardError);

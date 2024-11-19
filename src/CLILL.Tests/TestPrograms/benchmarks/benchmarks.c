@@ -7,9 +7,9 @@
 #define FREE(pointer) free(pointer)
 
 #ifdef _WIN32
-	#define EXPORT __declspec(dllexport)
+#define EXPORT __declspec(dllexport)
 #else
-	#define EXPORT extern
+#define EXPORT extern
 #endif
 
 #ifdef __cplusplus
@@ -89,42 +89,42 @@ inline static void benchmark_nbody_initialize_bodies(NBody* sun, NBody* end) {
 
 	sun[1] = STRUCT_INIT(NBody) { // Jupiter
 		4.84143144246472090e+00,
-		-1.16032004402742839e+00,
-		-1.03622044471123109e-01,
-		1.66007664274403694e-03 * daysPerYear,
-		7.69901118419740425e-03 * daysPerYear,
-		-6.90460016972063023e-05 * daysPerYear,
-		9.54791938424326609e-04 * solarMass
+			-1.16032004402742839e+00,
+			-1.03622044471123109e-01,
+			1.66007664274403694e-03 * daysPerYear,
+			7.69901118419740425e-03 * daysPerYear,
+			-6.90460016972063023e-05 * daysPerYear,
+			9.54791938424326609e-04 * solarMass
 	};
 
 	sun[2] = STRUCT_INIT(NBody) { // Saturn
 		8.34336671824457987e+00,
-		4.12479856412430479e+00,
-		-4.03523417114321381e-01,
-		-2.76742510726862411e-03 * daysPerYear,
-		4.99852801234917238e-03 * daysPerYear,
-		2.30417297573763929e-05 * daysPerYear,
-		2.85885980666130812e-04 * solarMass
+			4.12479856412430479e+00,
+			-4.03523417114321381e-01,
+			-2.76742510726862411e-03 * daysPerYear,
+			4.99852801234917238e-03 * daysPerYear,
+			2.30417297573763929e-05 * daysPerYear,
+			2.85885980666130812e-04 * solarMass
 	};
 
 	sun[3] = STRUCT_INIT(NBody) { // Uranus
 		1.28943695621391310e+01,
-		-1.51111514016986312e+01,
-		-2.23307578892655734e-01,
-		2.96460137564761618e-03 * daysPerYear,
-		2.37847173959480950e-03 * daysPerYear,
-		-2.96589568540237556e-05 * daysPerYear,
-		4.36624404335156298e-05 * solarMass
+			-1.51111514016986312e+01,
+			-2.23307578892655734e-01,
+			2.96460137564761618e-03 * daysPerYear,
+			2.37847173959480950e-03 * daysPerYear,
+			-2.96589568540237556e-05 * daysPerYear,
+			4.36624404335156298e-05 * solarMass
 	};
 
 	sun[4] = STRUCT_INIT(NBody) { // Neptune
 		1.53796971148509165e+01,
-		-2.59193146099879641e+01,
-		1.79258772950371181e-01,
-		2.68067772490389322e-03 * daysPerYear,
-		1.62824170038242295e-03 * daysPerYear,
-		-9.51592254519715870e-05 * daysPerYear,
-		5.15138902046611451e-05 * solarMass
+			-2.59193146099879641e+01,
+			1.79258772950371181e-01,
+			2.68067772490389322e-03 * daysPerYear,
+			1.62824170038242295e-03 * daysPerYear,
+			-9.51592254519715870e-05 * daysPerYear,
+			5.15138902046611451e-05 * solarMass
 	};
 
 	double vx = 0, vy = 0, vz = 0;
@@ -358,16 +358,16 @@ static float benchmark_pixar_raytracer_sample(Vector position, int* hitType) {
 	uint8_t letters[size];
 
 	// P              // I              // X              // A              // R
-	letters[0]  = 53; letters[12] = 65; letters[24] = 73; letters[32] = 85; letters[44] = 97; letters[56] = 99;
-	letters[1]  = 79; letters[13] = 79; letters[25] = 79; letters[33] = 79; letters[45] = 79; letters[57] = 87;
-	letters[2]  = 53; letters[14] = 69; letters[26] = 81; letters[34] = 89; letters[46] = 97; letters[58] = 105;
-	letters[3]  = 95; letters[15] = 79; letters[27] = 95; letters[35] = 95; letters[47] = 95; letters[59] = 79;
-	letters[4]  = 53; letters[16] = 67; letters[28] = 73; letters[36] = 89; letters[48] = 97;
-	letters[5]  = 87; letters[17] = 79; letters[29] = 95; letters[37] = 95; letters[49] = 87;
-	letters[6]  = 57; letters[18] = 67; letters[30] = 81; letters[38] = 93; letters[50] = 101;
-	letters[7]  = 87; letters[19] = 95; letters[31] = 79; letters[39] = 79; letters[51] = 87;
-	letters[8]  = 53; letters[20] = 65;                   letters[40] = 87; letters[52] = 97;
-	letters[9]  = 95; letters[21] = 95;                   letters[41] = 87; letters[53] = 95;
+	letters[0] = 53; letters[12] = 65; letters[24] = 73; letters[32] = 85; letters[44] = 97; letters[56] = 99;
+	letters[1] = 79; letters[13] = 79; letters[25] = 79; letters[33] = 79; letters[45] = 79; letters[57] = 87;
+	letters[2] = 53; letters[14] = 69; letters[26] = 81; letters[34] = 89; letters[46] = 97; letters[58] = 105;
+	letters[3] = 95; letters[15] = 79; letters[27] = 95; letters[35] = 95; letters[47] = 95; letters[59] = 79;
+	letters[4] = 53; letters[16] = 67; letters[28] = 73; letters[36] = 89; letters[48] = 97;
+	letters[5] = 87; letters[17] = 79; letters[29] = 95; letters[37] = 95; letters[49] = 87;
+	letters[6] = 57; letters[18] = 67; letters[30] = 81; letters[38] = 93; letters[50] = 101;
+	letters[7] = 87; letters[19] = 95; letters[31] = 79; letters[39] = 79; letters[51] = 87;
+	letters[8] = 53; letters[20] = 65;                   letters[40] = 87; letters[52] = 97;
+	letters[9] = 95; letters[21] = 95;                   letters[41] = 87; letters[53] = 95;
 	letters[10] = 57; letters[22] = 69;                   letters[42] = 91; letters[54] = 101;
 	letters[11] = 95; letters[23] = 95;                   letters[43] = 87; letters[55] = 95;
 
@@ -394,7 +394,8 @@ static float benchmark_pixar_raytracer_sample(Vector position, int* hitType) {
 
 		if (o.x > 0.0f) {
 			m = fabsf(sqrtf(benchmark_pixar_raytracer_modulus_self(o)) - 2.0f);
-		} else {
+		}
+		else {
 			if (o.y > 0.0f)
 				o.y += -2.0f;
 			else
@@ -457,46 +458,46 @@ static Vector benchmark_pixar_raytracer_trace(Vector origin, Vector direction) {
 		int hitType = benchmark_pixar_raytracer_ray_marching(origin, direction, &sampledPosition, &normal);
 
 		switch (hitType) {
-			case PIXAR_RAYTRACER_NONE:
-				break;
+		case PIXAR_RAYTRACER_NONE:
+			break;
 
-			case PIXAR_RAYTRACER_LETTER: {
-				direction = benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_add(direction, normal), benchmark_pixar_raytracer_modulus(normal, direction) * -2.0f);
-				origin = benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_add(sampledPosition, direction), 0.1f);
-				attenuation = benchmark_pixar_raytracer_multiply_float(attenuation, 0.2f);
+		case PIXAR_RAYTRACER_LETTER: {
+			direction = benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_add(direction, normal), benchmark_pixar_raytracer_modulus(normal, direction) * -2.0f);
+			origin = benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_add(sampledPosition, direction), 0.1f);
+			attenuation = benchmark_pixar_raytracer_multiply_float(attenuation, 0.2f);
 
-				break;
-			}
+			break;
+		}
 
-			case PIXAR_RAYTRACER_WALL: {
-				float
-					incidence = benchmark_pixar_raytracer_modulus(normal, lightDirection),
-					p = 6.283185f * benchmark_pixar_raytracer_random(),
-					c = benchmark_pixar_raytracer_random(),
-					s = sqrtf(1.0f - c),
-					g = normal.z < 0 ? -1.0f : 1.0f,
-					u = -1.0f / (g + normal.z),
-					v = normal.x * normal.y * u;
+		case PIXAR_RAYTRACER_WALL: {
+			float
+				incidence = benchmark_pixar_raytracer_modulus(normal, lightDirection),
+				p = 6.283185f * benchmark_pixar_raytracer_random(),
+				c = benchmark_pixar_raytracer_random(),
+				s = sqrtf(1.0f - c),
+				g = normal.z < 0 ? -1.0f : 1.0f,
+				u = -1.0f / (g + normal.z),
+				v = normal.x * normal.y * u;
 
-				direction = benchmark_pixar_raytracer_add(benchmark_pixar_raytracer_add(STRUCT_INIT(Vector) { v, g + normal.y * normal.y * u, -normal.y * (cosf(p) * s) }, STRUCT_INIT(Vector) { 1.0f + g * normal.x * normal.x * u, g * v, -g * normal.x }), benchmark_pixar_raytracer_multiply_float(normal, sqrtf(c)));
-				origin = benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_add(sampledPosition, direction), 0.1f);
-				attenuation = benchmark_pixar_raytracer_multiply_float(attenuation, 0.2f);
+			direction = benchmark_pixar_raytracer_add(benchmark_pixar_raytracer_add(STRUCT_INIT(Vector) { v, g + normal.y * normal.y * u, -normal.y * (cosf(p) * s) }, STRUCT_INIT(Vector) { 1.0f + g * normal.x * normal.x * u, g* v, -g * normal.x }), benchmark_pixar_raytracer_multiply_float(normal, sqrtf(c)));
+			origin = benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_add(sampledPosition, direction), 0.1f);
+			attenuation = benchmark_pixar_raytracer_multiply_float(attenuation, 0.2f);
 
-				if (incidence > 0 && benchmark_pixar_raytracer_ray_marching(benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_add(sampledPosition, normal), 0.1f), lightDirection, &sampledPosition, &normal) == PIXAR_RAYTRACER_SUN)
-					color = benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_multiply(benchmark_pixar_raytracer_add(color, attenuation), STRUCT_INIT(Vector) { 500.0f, 400.0f, 100.0f }), incidence);
+			if (incidence > 0 && benchmark_pixar_raytracer_ray_marching(benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_add(sampledPosition, normal), 0.1f), lightDirection, &sampledPosition, &normal) == PIXAR_RAYTRACER_SUN)
+				color = benchmark_pixar_raytracer_multiply_float(benchmark_pixar_raytracer_multiply(benchmark_pixar_raytracer_add(color, attenuation), STRUCT_INIT(Vector) { 500.0f, 400.0f, 100.0f }), incidence);
 
-				break;
-			}
+			break;
+		}
 
-			case PIXAR_RAYTRACER_SUN: {
-				color = benchmark_pixar_raytracer_multiply(benchmark_pixar_raytracer_add(color, attenuation), STRUCT_INIT(Vector) { 50.0f, 80.0f, 100.0f });
+		case PIXAR_RAYTRACER_SUN: {
+			color = benchmark_pixar_raytracer_multiply(benchmark_pixar_raytracer_add(color, attenuation), STRUCT_INIT(Vector) { 50.0f, 80.0f, 100.0f });
 
-				goto escape;
-			}
+			goto escape;
+		}
 		}
 	}
 
-	escape:
+escape:
 
 	return color;
 }
@@ -528,8 +529,8 @@ EXPORT float benchmark_pixar_raytracer(uint32_t width, uint32_t height, uint32_t
 			adjust = benchmark_pixar_raytracer_add_float(color, 1.0f);
 			color = STRUCT_INIT(Vector) {
 				color.x / adjust.x,
-				color.y / adjust.y,
-				color.z / adjust.z
+					color.y / adjust.y,
+					color.z / adjust.z
 			};
 
 			color = benchmark_pixar_raytracer_multiply_float(color, 255.0f);
@@ -1001,7 +1002,11 @@ EXPORT int benchmark_radix(uint32_t iterations) {
 
 int main()
 {
-    float result = benchmark_mandelbrot(150, 100, 50);
+#if defined(BENCHMARK_MANDELBROT)
+    float result = benchmark_mandelbrot(1920, 1080, 8);
+#else
+#error No benchmark selected
+#endif
     printf("%f", result);
     return 0;
 }
