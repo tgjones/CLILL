@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -62,6 +61,12 @@ namespace CLILL
             var function = module.FirstFunction;
             while (function.Handle != IntPtr.Zero)
             {
+                if (function.Name.StartsWith("llvm."))
+                {
+                    function = function.NextFunction;
+                    continue;
+                }
+
                 var methodInfo = GetOrCreateMethod(function, compilationContext);
 
                 if (methodInfo.Name == "main")
@@ -85,6 +90,10 @@ namespace CLILL
                 CompileMethodBody(functionToCompile, methodToCompile, compilationContext);
             }
 
+            var mainMethod = entryPoint != null
+                ? CreateMainMethod(typeBuilder, entryPoint)
+                : null;
+
             typeBuilder.CreateType();
 
             var metadataBuilder = assemblyBuilder.GenerateMetadata(
@@ -99,7 +108,7 @@ namespace CLILL
                 metadataRootBuilder: new MetadataRootBuilder(metadataBuilder),
                 ilStream: ilStream,
                 mappedFieldData: fieldData,
-                entryPoint: entryPoint != null ? MetadataTokens.MethodDefinitionHandle(entryPoint.MetadataToken) : default);
+                entryPoint: mainMethod != null ? MetadataTokens.MethodDefinitionHandle(mainMethod.MetadataToken) : default);
 
             var peBlob = new BlobBuilder();
             peBuilder.Serialize(peBlob);
@@ -124,6 +133,57 @@ namespace CLILL
                   }
                 }
                 """);
+        }
+
+        private static MethodBuilder CreateMainMethod(TypeBuilder typeBuilder, MethodInfo entryPoint)
+        {
+            var method = typeBuilder.DefineMethod(
+                "Main",
+                MethodAttributes.Static | MethodAttributes.Public,
+                CallingConventions.Standard,
+                typeof(int),
+                [typeof(string[])]);
+
+            var ilGenerator = method.GetILGenerator();
+
+            // TODO:
+
+            // nint* argv = (nint*)NativeMemory.Alloc((nuint)args.Length, (nuint)sizeof(nint));
+            // 
+            // for (var i = 0; i < args.Length; i++)
+            // {
+            //     argv[i] = Marshal.StringToHGlobalAnsi(args[i]);
+            // }
+            // 
+            // return main(args.Length, argv);
+
+            foreach (var parameter in entryPoint.GetParameters())
+            {
+                if (parameter.ParameterType == typeof(int))
+                {
+                    ilGenerator.Emit(OpCodes.Ldc_I4_0);
+                }
+                else if (parameter.ParameterType == typeof(void*))
+                {
+                    ilGenerator.Emit(OpCodes.Ldc_I4_0);
+                    ilGenerator.Emit(OpCodes.Conv_U);
+                }
+                else
+                {
+                    throw new NotImplementedException();
+                }
+            }
+
+            ilGenerator.Emit(OpCodes.Call, entryPoint);
+
+            if (entryPoint.ReturnType == typeof(void))
+            {
+                ilGenerator.Emit(OpCodes.Ldc_I4_0);
+            }
+
+            ilGenerator.Emit(OpCodes.Ret);
+
+            return method;
         }
 
         public void Dispose()

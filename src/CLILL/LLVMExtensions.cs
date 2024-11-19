@@ -125,6 +125,7 @@ internal static class LLVMExtensions
             case LLVMValueKind.LLVMConstantDataVectorValueKind:
             case LLVMValueKind.LLVMConstantIntValueKind:
             case LLVMValueKind.LLVMConstantPointerNullValueKind:
+            case LLVMValueKind.LLVMPoisonValueValueKind:
                 return true;
 
             case LLVMValueKind.LLVMGlobalVariableValueKind:
@@ -141,9 +142,11 @@ internal static class LLVMExtensions
             LLVMOpcode.LLVMAdd => value.GetOperand(0).HasNoSideEffects() && value.GetOperand(1).HasNoSideEffects(),
             LLVMOpcode.LLVMGetElementPtr => value.GetOperands().All(x => x.HasNoSideEffects()),
             LLVMOpcode.LLVMICmp => value.GetOperand(0).HasNoSideEffects() && value.GetOperand(1).HasNoSideEffects(),
+            LLVMOpcode.LLVMInsertElement => value.GetOperands().All(x => x.HasNoSideEffects()),
             LLVMOpcode.LLVMLoad => true, // TODO: Is this correct?
             LLVMOpcode.LLVMPHI => true, // Because we load it from a local that is guaranteed not to change in the current block
             LLVMOpcode.LLVMSExt => value.GetOperand(0).HasNoSideEffects(),
+            LLVMOpcode.LLVMShuffleVector => value.GetOperands().All(x => x.HasNoSideEffects()),
             LLVMOpcode.LLVMZExt => value.GetOperand(0).HasNoSideEffects(),
             _ => false,
         };

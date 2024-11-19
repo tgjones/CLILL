@@ -65,34 +65,40 @@ namespace CLILL
             {
                 throw new InvalidOperationException();
             }
-            if (typeRef.ElementType.Kind != LLVMTypeKind.LLVMIntegerTypeKind)
-            {
-                throw new InvalidOperationException();
-            }
-            switch ((context.GetSizeOfTypeInBytes(typeRef.ElementType), typeRef.VectorSize))
-            {
-                case (1, 4):
-                    return CreateArrayOrVectorType(typeRef, context, (int)typeRef.VectorSize);
 
-                case (4, 4):
-                    return typeof(Vector128<>).MakeGenericType(GetMsilType(typeRef.ElementType, context));
+            var vectorSize = context.GetSizeOfTypeInBytes(typeRef);
 
-                default:
-                    throw new NotImplementedException();
-            }
+            return vectorSize switch
+            {
+                8 or 16 or 32 or 64 => GetGenericVectorType(typeRef, context).MakeGenericType(GetMsilType(typeRef.ElementType, context)),
+                _ => CreateArrayOrVectorType(typeRef.ElementType, context, (int)typeRef.VectorSize),
+            };
         }
+
+        private static int AnonymousStructIndex = 0;
 
         private static Type CreateStructType(LLVMTypeRef typeRef, CompilationContext context)
         {
-            if (typeRef.IsPackedStruct || typeRef.IsOpaqueStruct)
+            if (typeRef.IsOpaqueStruct)
             {
                 throw new NotImplementedException();
             }
 
+            var structName = typeRef.StructName;
+            if (string.IsNullOrEmpty(structName))
+            {
+                structName = $"AnonymousStruct{AnonymousStructIndex++}";
+            }
+
+            var packingSize = typeRef.IsPackedStruct
+                ? System.Reflection.Emit.PackingSize.Size1
+                : System.Reflection.Emit.PackingSize.Unspecified;
+
             var structType = context.ModuleBuilder.DefineType(
-                typeRef.StructName,
+                structName,
                 TypeAttributes.Public | TypeAttributes.SequentialLayout,
-                typeof(ValueType));
+                typeof(ValueType),
+                packingSize);
 
             for (var i = 0; i < typeRef.StructElementTypes.Length; i++)
             {
@@ -115,17 +121,22 @@ namespace CLILL
             return builtType;
         }
 
+        private static Type GetAllocaArrayType(LLVMTypeRef elementType, int arrayLength, CompilationContext context)
+        {
+            return context.AllocaArrayTypes.GetOrAdd((elementType, arrayLength), _ => CreateArrayOrVectorType(elementType, context, arrayLength));
+        }
+
         private static Type CreateArrayType(LLVMTypeRef arrayTypeRef, CompilationContext context)
         {
-            return CreateArrayOrVectorType(arrayTypeRef, context, (int)arrayTypeRef.ArrayLength);
+            return CreateArrayOrVectorType(arrayTypeRef.ElementType, context, (int)arrayTypeRef.ArrayLength);
         }
 
         private static Type CreateArrayOrVectorType(
-            LLVMTypeRef arrayOrVectorTypeRef, 
+            LLVMTypeRef elementTypeRef, 
             CompilationContext context,
             int length)
         {
-            var elementType = GetMsilType(arrayOrVectorTypeRef.ElementType, context);
+            var elementType = GetMsilType(elementTypeRef, context);
 
             if (elementType.IsPointer)
             {
@@ -137,18 +148,78 @@ namespace CLILL
                 TypeAttributes.Public | TypeAttributes.SequentialLayout,
                 typeof(ValueType));
 
-            var customAttributeBuilder = new System.Reflection.Emit.CustomAttributeBuilder(
-                typeof(InlineArrayAttribute).GetConstructor([typeof(int)]),
-                [length]);
+            // [InlineArray] doesn't allow zero lengths.
+            // So when the length is zero, we just create an empty normal struct instead.
+            // This will still have the correct size / alignment.
+            if (length > 0)
+            {
+                var customAttributeBuilder = new System.Reflection.Emit.CustomAttributeBuilder(
+                    typeof(InlineArrayAttribute).GetConstructor([typeof(int)]),
+                    [length]);
 
-            structType.SetCustomAttribute(customAttributeBuilder);
+                structType.SetCustomAttribute(customAttributeBuilder);
 
-            structType.DefineField(
-                $"_element0",
-                elementType,
-                FieldAttributes.Private);
+                structType.DefineField(
+                    $"_element0",
+                    elementType,
+                    FieldAttributes.Private);
+            }
 
             return structType.CreateType();
+        }
+
+        private static Type GetNonGenericVectorType(LLVMTypeRef vectorType, CompilationContext context)
+        {
+            var vectorSize = context.GetSizeOfTypeInBytes(vectorType);
+
+            return vectorSize switch
+            {
+                8 => typeof(Vector64),
+                16 => typeof(Vector128),
+                32 => typeof(Vector256),
+                64 => typeof(Vector512),
+                _ => throw new NotImplementedException()
+            };
+        }
+
+        private static Type GetNonGenericDoubleWidthVectorType(LLVMTypeRef vectorType, CompilationContext context)
+        {
+            var vectorSize = context.GetSizeOfTypeInBytes(vectorType);
+
+            return vectorSize switch
+            {
+                8 => typeof(Vector128),
+                16 => typeof(Vector256),
+                32 => typeof(Vector512),
+                _ => throw new NotImplementedException()
+            };
+        }
+
+        private static Type GetGenericVectorType(LLVMTypeRef vectorType, CompilationContext context)
+        {
+            var vectorSize = context.GetSizeOfTypeInBytes(vectorType);
+
+            return vectorSize switch
+            {
+                8 => typeof(Vector64<>),
+                16 => typeof(Vector128<>),
+                32 => typeof(Vector256<>),
+                64 => typeof(Vector512<>),
+                _ => throw new NotImplementedException($"Vector size {vectorSize} not implemented")
+            };
+        }
+
+        private static Type GetGenericDoubleWidthVectorType(LLVMTypeRef vectorType, CompilationContext context)
+        {
+            var vectorSize = context.GetSizeOfTypeInBytes(vectorType);
+
+            return vectorSize switch
+            {
+                8 => typeof(Vector128<>),
+                16 => typeof(Vector256<>),
+                32 => typeof(Vector512<>),
+                _ => throw new NotImplementedException($"Vector size {vectorSize} not implemented")
+            };
         }
     }
 }

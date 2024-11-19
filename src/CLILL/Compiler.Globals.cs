@@ -1,10 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using LLVMSharp.Interop;
 
@@ -34,107 +32,18 @@ namespace CLILL
 
                         var globalType = GetMsilType(valueType, context);
 
-                        FieldBuilder globalField;
-                        if (global.IsGlobalConstant)
-                        {
-                            var constantData = new byte[context.GetSizeOfTypeInBytes(valueType)];
+                        var globalField = context.TypeBuilder.DefineField(
+                            global.Name.Replace(".", string.Empty),
+                            globalType,
+                            FieldAttributes.Private | FieldAttributes.Static);
 
-                            switch (globalValue.Kind)
-                            {
-                                case LLVMValueKind.LLVMConstantAggregateZeroValueKind:
-                                    // Nothing to do.
-                                    break;
+                        globalField.SetCustomAttribute(
+                            new CustomAttributeBuilder(
+                                typeof(FixedAddressValueTypeAttribute).GetConstructor([]),
+                                []));
 
-                                case LLVMValueKind.LLVMConstantDataArrayValueKind:
-                                    var elementSizeInBytes = context.GetSizeOfTypeInBytes(valueType.ElementType);
-                                    for (var i = 0; i < valueType.ArrayLength; i++)
-                                    {
-                                        var elementValue = globalValue.GetAggregateElement((uint)i);
-                                        switch (elementValue.TypeOf.Kind)
-                                        {
-                                            case LLVMTypeKind.LLVMIntegerTypeKind:
-                                                switch (elementValue.TypeOf.IntWidth)
-                                                {
-                                                    case 8:
-                                                        constantData[i] = (byte)elementValue.ConstIntZExt;
-                                                        break;
-
-                                                    case 32:
-                                                        Buffer.BlockCopy(
-                                                            BitConverter.GetBytes((int)elementValue.ConstIntZExt), 
-                                                            0, 
-                                                            constantData, 
-                                                            i * elementSizeInBytes, 
-                                                            elementSizeInBytes);
-                                                        break;
-
-                                                    default:
-                                                        throw new NotImplementedException($"Int width {elementValue.TypeOf.IntWidth} not implemented: {elementValue}");
-                                                }
-                                                break;
-
-                                            default:
-                                                throw new NotImplementedException();
-                                        }
-                                        
-                                    }
-                                    break;
-
-                                default:
-                                    throw new NotImplementedException($"Global value kind {globalValue.Kind} not implemented: {globalValue}");
-                            }
-
-                            globalField = context.TypeBuilder.DefineInitializedData(
-                                global.Name.Replace(".", string.Empty),
-                                constantData,
-                                FieldAttributes.Private);
-                        }
-                        else
-                        {
-                            globalField = context.TypeBuilder.DefineField(
-                                global.Name.Replace(".", string.Empty),
-                                globalType,
-                                FieldAttributes.Private | FieldAttributes.Static);
-
-                            globalField.SetCustomAttribute(
-                                new CustomAttributeBuilder(
-                                    typeof(FixedAddressValueTypeAttribute).GetConstructor([]),
-                                    []));
-
-                            switch (globalValue.Kind)
-                            {
-                                case LLVMValueKind.LLVMConstantAggregateZeroValueKind:
-                                case LLVMValueKind.LLVMConstantPointerNullValueKind:
-                                    // Nothing to do.
-                                    break;
-
-                                case LLVMValueKind.LLVMConstantArrayValueKind:
-                                case LLVMValueKind.LLVMConstantDataArrayValueKind:
-                                    EmitLoadConstantArray(ilGenerator, context, globalValue, valueType);
-                                    ilGenerator.Emit(OpCodes.Stsfld, globalField);
-                                    break;
-
-                                case LLVMValueKind.LLVMConstantFPValueKind:
-                                case LLVMValueKind.LLVMConstantIntValueKind:
-                                    EmitLoadConstant(ilGenerator, valueType, globalValue, context);
-                                    ilGenerator.Emit(OpCodes.Stsfld, globalField);
-                                    break;
-
-                                case LLVMValueKind.LLVMConstantStructValueKind:
-                                    EmitLoadConstantStruct(ilGenerator, context, globalValue, globalType);
-                                    ilGenerator.Emit(OpCodes.Stsfld, globalField);
-                                    break;
-
-                                case LLVMValueKind.LLVMGlobalVariableValueKind:
-                                    var otherGlobalField = context.Globals[globalValue];
-                                    ilGenerator.Emit(OpCodes.Ldsflda, otherGlobalField);
-                                    ilGenerator.Emit(OpCodes.Stsfld, globalField);
-                                    break;
-
-                                default:
-                                    throw new NotImplementedException($"Global value kind {globalValue.Kind} not implemented: {globalValue}");
-                            }
-                        }
+                        EmitConstantValue(globalValue, valueType, ilGenerator, context);
+                        ilGenerator.Emit(OpCodes.Stsfld, globalField);
 
                         context.Globals.Add(global, globalField);
                         break;
@@ -145,6 +54,39 @@ namespace CLILL
             }
 
             ilGenerator.Emit(OpCodes.Ret);
+        }
+
+        private static void GetConstantIntData(LLVMValueRef value, byte[] dest, int destIndex)
+        {
+            var sizeInBytes = (int)value.TypeOf.IntWidth / 8;
+
+            switch (sizeInBytes)
+            {
+                case 1:
+                    dest[destIndex] = (byte)value.ConstIntZExt;
+                    break;
+
+                case 2:
+                    Buffer.BlockCopy(
+                        BitConverter.GetBytes((short)value.ConstIntZExt),
+                        0,
+                        dest,
+                        destIndex * sizeInBytes,
+                        sizeInBytes);
+                    break;
+
+                case 4:
+                    Buffer.BlockCopy(
+                        BitConverter.GetBytes((int)value.ConstIntZExt),
+                        0,
+                        dest,
+                        destIndex * sizeInBytes,
+                        sizeInBytes);
+                    break;
+
+                default:
+                    throw new NotImplementedException($"Int width {value.TypeOf.IntWidth} not implemented: {value}");
+            }
         }
 
         private void EmitLoadConstantArray(
@@ -186,7 +128,7 @@ namespace CLILL
                     ilGenerator.Emit(OpCodes.Add);
                 }
                 var elementValue = arrayOrVectorValue.GetAggregateElement((uint)i);
-                EmitLoadConstant(ilGenerator, arrayOrVectorValueType.ElementType, elementValue, context);
+                EmitConstantValue(elementValue, arrayOrVectorValueType.ElementType, ilGenerator, context);
                 EmitStoreIndirect(ilGenerator, arrayOrVectorValueType.ElementType, context);
             }
 
@@ -209,7 +151,7 @@ namespace CLILL
             {
                 ilGenerator.Emit(OpCodes.Ldloca, local);
                 var elementValue = structValue.GetAggregateElement((uint)i);
-                EmitLoadConstant(ilGenerator, elementValue.TypeOf, elementValue, context);
+                EmitConstantValue(elementValue, elementValue.TypeOf, ilGenerator, context);
                 ilGenerator.Emit(OpCodes.Stfld, structFields[i]);
             }
 
@@ -222,24 +164,28 @@ namespace CLILL
             LLVMValueRef vectorValue,
             LLVMTypeRef vectorType)
         {
-            switch ((context.GetSizeOfTypeInBytes(vectorType.ElementType), vectorType.VectorSize))
-            {
-                case (1, 4):
-                    var vectorTypeMsil = GetMsilVectorType(vectorType, context);
-                    EmitLoadConstantArrayOrVector(ilGenerator, context, vectorValue, vectorType, (int)vectorType.VectorSize);
-                    break;
+            var vectorSizeInBytes = context.GetSizeOfTypeInBytes(vectorType);
 
-                case (4, 4):
+            switch (vectorSizeInBytes)
+            {
+                case 8:
+                case 16:
+                case 32:
+                case 64:
                     var elementType = GetMsilType(vectorType.ElementType, context);
                     for (var i = 0u; i < vectorType.VectorSize; i++)
                     {
-                        EmitLoadConstant(ilGenerator, vectorType.ElementType, vectorValue.GetAggregateElement(i), context);
+                        EmitConstantValue(vectorValue.GetAggregateElement(i), vectorType.ElementType, ilGenerator, context);
                     }
-                    ilGenerator.Emit(OpCodes.Call, typeof(Vector128).GetMethod(nameof(Vector128.Create), [elementType, elementType, elementType, elementType]));
+                    var createMethodParameterTypes = new Type[vectorType.VectorSize];
+                    Array.Fill(createMethodParameterTypes, elementType);
+                    ilGenerator.Emit(OpCodes.Call, GetNonGenericVectorType(vectorType, context).GetMethod("Create", createMethodParameterTypes));
                     break;
 
                 default:
-                    throw new NotImplementedException();
+                    var vectorTypeMsil = GetMsilVectorType(vectorType, context);
+                    EmitLoadConstantArrayOrVector(ilGenerator, context, vectorValue, vectorType, (int)vectorType.VectorSize);
+                    break;
             }
         }
 
@@ -320,9 +266,18 @@ namespace CLILL
                     ilGenerator.Emit(OpCodes.Stobj, GetMsilType(type, context));
                     break;
 
+                case LLVMTypeKind.LLVMDoubleTypeKind:
+                    ilGenerator.Emit(OpCodes.Stind_R8);
+                    break;
+
+                case LLVMTypeKind.LLVMFloatTypeKind:
+                    ilGenerator.Emit(OpCodes.Stind_R4);
+                    break;
+
                 case LLVMTypeKind.LLVMIntegerTypeKind:
                     ilGenerator.Emit(type.IntWidth switch
                     {
+                        1 => OpCodes.Stind_I1,
                         8 => OpCodes.Stind_I1,
                         16 => OpCodes.Stind_I2,
                         32 => OpCodes.Stind_I4,

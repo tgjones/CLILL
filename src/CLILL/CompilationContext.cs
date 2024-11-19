@@ -20,6 +20,7 @@ namespace CLILL
 
         public readonly ConcurrentDictionary<LLVMTypeRef, Type> StructTypes = [];
         public readonly ConcurrentDictionary<LLVMTypeRef, Type> ArrayTypes = [];
+        public readonly ConcurrentDictionary<(LLVMTypeRef, int), Type> AllocaArrayTypes = [];
 
         public CompilationContext(
             LLVMModuleRef llvmModule,

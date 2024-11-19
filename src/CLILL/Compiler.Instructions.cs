@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using CLILL.Runtime;
 using LLVMSharp.Interop;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace CLILL
 {
@@ -51,56 +50,20 @@ namespace CLILL
                     break;
 
                 case LLVMOpcode.LLVMAnd:
-                    {
-                        EmitValue(instruction.GetOperand(0), context);
-                        EmitValue(instruction.GetOperand(1), context);
-                        ilGenerator.Emit(OpCodes.And);
-                        break;
-                    }
+                    EmitBinaryOperation(instruction, OpCodes.And, nameof(Vector128.BitwiseAnd), context);
+                    break;
 
                 case LLVMOpcode.LLVMAlloca:
-                    {
-                        var numElements = instruction.GetOperand(0);
-                        if (numElements.Kind != LLVMValueKind.LLVMConstantIntValueKind || numElements.ConstIntSExt != 1)
-                        {
-                            // TODO: Implement array allocation.
-                            // TODO: Handle non-constant NumElements by using localloc.
-                            throw new NotImplementedException();
-                        }
+                    EmitAlloca(instruction, context);
+                    break;
 
-                        // TODO: Alignment
-                        var allocatedType = instruction.GetAllocatedType();
-                        var local = ilGenerator.DeclareLocal(GetMsilType(allocatedType, context.CompilationContext));
-                        context.Locals.Add(instruction, local);
-                        //if (allocatedType.Kind == LLVMTypeKind.LLVMArrayTypeKind)
-                        //{
-                        //    ilGenerator.Emit(OpCodes.Ldc_I4, context.CompilationContext.GetSizeOfTypeInBytes(allocatedType));
-                        //    ilGenerator.Emit(OpCodes.Conv_U);
-                        //    ilGenerator.Emit(OpCodes.Localloc);
-                        //    ilGenerator.Emit(OpCodes.Stloc, local);
-                        //}
-                        break;
-                    }
+                case LLVMOpcode.LLVMAShr:
+                    EmitBinaryOperation(instruction, OpCodes.Shr, nameof(Vector128.ShiftRightArithmetic), context);
+                    break;
 
-                case LLVMOpcode.LLVMStore:
-                    {
-                        var value = instruction.GetOperand(0);
-                        var ptr = instruction.GetOperand(1);
-
-                        if (ptr.IsAAllocaInst != null && context.Locals.TryGetValue(ptr, out var local) && (local.LocalType.IsPrimitive || local.LocalType.IsPointer))
-                        {
-                            // But only if value came from alloca?
-                            EmitValue(value, context, forceLdloca: value.IsAAllocaInst != null /*&& value.TypeOf.Kind == LLVMTypeKind.LLVMPointerTypeKind*/);
-                            ilGenerator.Emit(OpCodes.Stloc, local);
-                        }
-                        else
-                        {
-                            EmitValue(ptr, context);
-                            EmitValue(value, context);
-                            EmitStoreIndirect(context.ILGenerator, value.TypeOf, context.CompilationContext);
-                        }
-                        break;
-                    }
+                case LLVMOpcode.LLVMBitCast:
+                    EmitValue(instruction.GetOperand(0), context);
+                    break;
 
                 case LLVMOpcode.LLVMBr:
                     EmitBr(instruction, context);
@@ -108,6 +71,10 @@ namespace CLILL
 
                 case LLVMOpcode.LLVMCall:
                     EmitCall(instruction, context);
+                    break;
+
+                case LLVMOpcode.LLVMExtractElement:
+                    EmitExtractElement(instruction, context);
                     break;
 
                 case LLVMOpcode.LLVMFCmp:
@@ -132,6 +99,10 @@ namespace CLILL
 
                 case LLVMOpcode.LLVMFDiv:
                     EmitBinaryOperation(instruction, OpCodes.Div, nameof(Vector128.Divide), context);
+                    break;
+
+                case LLVMOpcode.LLVMFNeg:
+                    EmitNegate(instruction, context);
                     break;
 
                 case LLVMOpcode.LLVMFPExt:
@@ -190,6 +161,10 @@ namespace CLILL
                     EmitBinaryOperation(instruction, OpCodes.Shl, nameof(Vector128.ShiftLeft), context);
                     break;
 
+                case LLVMOpcode.LLVMStore:
+                    EmitStore(instruction, context);
+                    break;
+
                 case LLVMOpcode.LLVMShuffleVector:
                     EmitShuffleVector(instruction, context);
                     break;
@@ -219,6 +194,10 @@ namespace CLILL
                     EmitBinaryOperation(instruction, OpCodes.Div_Un, nameof(Vector128.Divide), context);
                     break;
 
+                case LLVMOpcode.LLVMUIToFP:
+                    EmitConversion(instruction, context, Signedness.Unsigned);
+                    break;
+
                 case LLVMOpcode.LLVMUnreachable:
                     ilGenerator.Emit(OpCodes.Ldstr, "Unreachable instruction");
                     ilGenerator.Emit(OpCodes.Newobj, typeof(Exception).GetConstructor([typeof(string)]));
@@ -242,44 +221,251 @@ namespace CLILL
             }
         }
 
+        private void EmitNegate(LLVMValueRef instruction, FunctionCompilationContext context)
+        {
+            EmitValue(instruction.GetOperand(0), context);
+            context.ILGenerator.Emit(OpCodes.Neg);
+        }
+
+        private void EmitExtractElement(LLVMValueRef instruction, FunctionCompilationContext context)
+        {
+            // Vector
+            EmitValue(instruction.GetOperand(0), context);
+
+            // Index
+            EmitValue(instruction.GetOperand(1), context);
+            context.ILGenerator.Emit(OpCodes.Conv_I4);
+
+            var vectorType = instruction.GetOperand(0).TypeOf;
+            var getElementMethod = GetNonGenericVectorType(vectorType, context.CompilationContext)
+                .GetMethod("GetElement")
+                .MakeGenericMethod(GetMsilType(vectorType.ElementType, context.CompilationContext));
+            context.ILGenerator.Emit(OpCodes.Call, getElementMethod);
+        }
+
+        private void EmitAlloca(LLVMValueRef instruction, FunctionCompilationContext context)
+        {
+            var numElements = instruction.GetOperand(0);
+
+            // TODO: Alignment
+
+            switch (numElements.Kind)
+            {
+                case LLVMValueKind.LLVMConstantIntValueKind:
+                    var allocatedType = instruction.GetAllocatedType();
+                    var localType = numElements.ConstIntSExt != 1
+                        ? GetAllocaArrayType(allocatedType, (int)numElements.ConstIntSExt, context.CompilationContext)
+                        : GetMsilType(allocatedType, context.CompilationContext);
+                    var local = context.ILGenerator.DeclareLocal(localType);
+                    context.Locals.Add(instruction, local);
+                    break;
+
+                case LLVMValueKind.LLVMInstructionValueKind:
+                    EmitValue(numElements, context);
+                    context.ILGenerator.Emit(OpCodes.Conv_U);
+                    context.ILGenerator.Emit(OpCodes.Localloc);
+                    EmitStoreResult(context.ILGenerator, instruction, context);
+                    break;
+
+                default:
+                    throw new NotImplementedException($"Alloca not implemented for kind {numElements.Kind}: {instruction}");
+            }
+        }
+
+        private void EmitStore(LLVMValueRef instruction, FunctionCompilationContext context)
+        {
+            var value = instruction.GetOperand(0);
+            var ptr = instruction.GetOperand(1);
+
+            if (ptr.IsAAllocaInst != null && context.Locals.TryGetValue(ptr, out var local) && (local.LocalType.IsPrimitive || local.LocalType.IsPointer))
+            {
+                // But only if value came from alloca?
+                EmitValue(value, context, forceLdloca: value.IsAAllocaInst != null /*&& value.TypeOf.Kind == LLVMTypeKind.LLVMPointerTypeKind*/);
+                context.ILGenerator.Emit(OpCodes.Stloc, local);
+            }
+            else
+            {
+                EmitValue(ptr, context);
+                EmitValue(value, context);
+                EmitStoreIndirect(context.ILGenerator, value.TypeOf, context.CompilationContext);
+            }
+        }
+
         private void EmitShuffleVector(LLVMValueRef instruction, FunctionCompilationContext context)
         {
-            // This is a workaround for there not yet being a Vector128.Shuffle that takes two input vectors.
-            // It's being discussed in https://github.com/dotnet/runtime/issues/63331
+            // shufflevector is used for a few distinct purposes.
+            // We handle them separately.
 
-            if (instruction.GetOperand(0).TypeOf.VectorSize != 4
-                || instruction.GetOperand(0).TypeOf.ElementType.Kind != LLVMTypeKind.LLVMIntegerTypeKind
-                || instruction.GetOperand(0).TypeOf.ElementType.IntWidth != 32)
+            // 1. insertelement and shufflevector are used together to splat a scalar across a whole vector.
+            //
+            // LLVM:
+            // %1 = insertelement <2 x double> poison, double 1.0, i64 0
+            // %2 = shufflevector <2 x double> %1, <2 x double> poison, <2 x i32> zeroinitializer
+            //
+            // .NET:
+            // Vector128.Create(1.0)
+
+            var sourceVector0 = instruction.GetOperand(0);
+            var sourceVector1 = instruction.GetOperand(1);
+            var maskIndices = instruction.GetShuffleVectorMaskValues();
+
+            if (sourceVector0.Kind == LLVMValueKind.LLVMInstructionValueKind
+                && sourceVector0.InstructionOpcode == LLVMOpcode.LLVMInsertElement
+                && sourceVector0.GetOperand(0).Kind == LLVMValueKind.LLVMPoisonValueValueKind
+                && sourceVector0.GetOperand(2).Kind == LLVMValueKind.LLVMConstantIntValueKind
+                && sourceVector0.GetOperand(2).ConstIntZExt == 0
+                && maskIndices.All(x => x == 0))
             {
-                throw new NotImplementedException();
+                // Emit scalar value.
+                var scalarValue = sourceVector0.GetOperand(1);
+                EmitValue(scalarValue, context);
+
+                // Create vector from scalar value.
+                var scalarValueType = GetMsilType(scalarValue.TypeOf, context.CompilationContext);
+                context.ILGenerator.Emit(
+                    OpCodes.Call,
+                    GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext).GetMethod("Create", [scalarValueType]));
+
+                return;
             }
 
-            var elementType = GetMsilType(instruction.TypeOf.ElementType, context.CompilationContext);
-            var vectorType = typeof(Vector128<>).MakeGenericType(elementType);
+            // 2. Combining two vectors.
+            // 
+            // LLVM:
+            // %22 = shufflevector <4 x float> %15, <4 x float> %18, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+            // 
+            // .NET:
+            // Vector256.Create(%15, %18)
 
-            // Combine input vectors into one Vector256.
-            EmitValue(instruction.GetOperand(0), context);
-            EmitValue(instruction.GetOperand(1), context);
-            context.ILGenerator.Emit(OpCodes.Call, typeof(Vector256).GetMethod(nameof(Vector256.Create), [vectorType, vectorType]));
-
-            // Indices
-            var maskValues = instruction.GetShuffleVectorMaskValues();
-            if (maskValues.Length != 4)
+            if (maskIndices.Length == sourceVector0.TypeOf.VectorSize * 2
+                && maskIndices.SequenceEqual(Enumerable.Range(0, maskIndices.Length)))
             {
-                throw new NotImplementedException();
+                // Emit source vectors.
+                EmitValue(sourceVector0, context);
+                EmitValue(sourceVector1, context);
+
+                // Emit call to Create.
+                var sourceVectorType = GetMsilType(sourceVector0.TypeOf, context.CompilationContext);
+                context.ILGenerator.Emit(
+                    OpCodes.Call,
+                    GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext).GetMethod("Create", [sourceVectorType, sourceVectorType]));
+
+                return;
             }
-            foreach (var maskValue in maskValues)
+
+            // 3. A "true" shuffle where we select elements from two input vectors.
+            //    For smaller vectors, we could use .NET's shuffle vector APIs and do it in hardware,
+            //    and this is a TODO. Although even then there aren't yet shuffle APIs that take two
+            //    input vectors; that's is being discussed in https://github.com/dotnet/runtime/issues/63331
+            //    But if the input vector is too large to fit into even a Vector512, we need to use
+            //    a custom struct and do it in software. For now, for simplicity, we always use a
+            //    custom struct.
+            //
+            // LLVM:
+            // %25 = shufflevector <16 x float> %24, <16 x float> <float 2.000000e+00, float 2.000000e+00, float 2.000000e+00, float 2.000000e+00, float 3.000000e+00, float 3.000000e+00, float 3.000000e+00, float 3.000000e+00, float poison, float poison, float poison, float poison, float poison, float poison, float poison, float poison>, <24 x i32> <i32 0, i32 4, i32 8, i32 12, i32 16, i32 20, i32 1, i32 5, i32 9, i32 13, i32 17, i32 21, i32 2, i32 6, i32 10, i32 14, i32 18, i32 22, i32 3, i32 7, i32 11, i32 15, i32 19, i32 23>
+            //
+            // .NET:
+            // StructArray24 result;
+            // result[0] = %24[0];
+            // result[1] = %24[4];
+            // result[2] = %24[8];
+            // result[3] = %24[12];
+            // result[4] = 2.0;
+            // ...
+
+            var sourceVector0Local = context.ILGenerator.DeclareLocal(GetMsilType(sourceVector0.TypeOf, context.CompilationContext));
+            EmitValue(sourceVector0, context);
+            context.ILGenerator.Emit(OpCodes.Stloc, sourceVector0Local);
+
+            var sourceVector1Local = context.ILGenerator.DeclareLocal(GetMsilType(sourceVector1.TypeOf, context.CompilationContext));
+            EmitValue(sourceVector1, context);
+            context.ILGenerator.Emit(OpCodes.Stloc, sourceVector1Local);
+
+            var elementSizeInBytes = context.CompilationContext.GetSizeOfTypeInBytes(instruction.TypeOf.ElementType);
+            var resultLocal = context.ILGenerator.DeclareLocal(GetMsilType(instruction.TypeOf, context.CompilationContext));
+
+            for (var i = 0; i < maskIndices.Length; i++)
             {
-                context.ILGenerator.Emit(OpCodes.Ldc_I4, maskValue);
+                // Emit destination address.
+                context.ILGenerator.Emit(OpCodes.Ldloca, resultLocal);
+                context.ILGenerator.Emit(OpCodes.Ldc_I4, i * elementSizeInBytes);
+                context.ILGenerator.Emit(OpCodes.Conv_U);
+                context.ILGenerator.Emit(OpCodes.Add);
+
+                // Emit value.
+                var maskIndex = maskIndices[i];
+                var sourceVectorLocal = maskIndex < sourceVector0.TypeOf.VectorSize
+                    ? sourceVector0Local
+                    : sourceVector1Local;
+                context.ILGenerator.Emit(OpCodes.Ldloca, sourceVectorLocal);
+                context.ILGenerator.Emit(OpCodes.Ldc_I4, maskIndex * elementSizeInBytes);
+                context.ILGenerator.Emit(OpCodes.Conv_U);
+                context.ILGenerator.Emit(OpCodes.Add);
+                EmitLoadIndirect(instruction.TypeOf.ElementType, context);
+
+                // Emit store indirect instruction.
+                EmitStoreIndirect(context.ILGenerator, instruction.TypeOf.ElementType, context.CompilationContext);
             }
-            context.ILGenerator.Emit(OpCodes.Call, typeof(Vector128).GetMethod(nameof(Vector128.Create), [typeof(int), typeof(int), typeof(int), typeof(int)]));
-            context.ILGenerator.Emit(OpCodes.Call, typeof(Vector128).GetMethod(nameof(Vector128.ToVector256)).MakeGenericMethod(elementType));
 
-            // Do the shuffle
-            context.ILGenerator.Emit(OpCodes.Call, typeof(Vector256).GetMethod(nameof(Vector256.Shuffle), [typeof(Vector256<>).MakeGenericType(elementType), typeof(Vector256<>).MakeGenericType(typeof(int))]));
+            // Load the result.
+            context.ILGenerator.Emit(OpCodes.Ldloc, resultLocal);
 
-            // Extract the Vector128 result
-            context.ILGenerator.Emit(OpCodes.Call, typeof(Vector256).GetMethod(nameof(Vector256.GetLower)).MakeGenericMethod(elementType));
+
+            //var vectorSize = context.CompilationContext.GetSizeOfTypeInBytes(instruction.TypeOf);
+
+            //var elementType = GetMsilType(instruction.TypeOf.ElementType, context.CompilationContext);
+            //var vectorType = GetMsilType(instruction.TypeOf, context.CompilationContext);
+
+            //var singleWidthVectorType = GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext);
+            //var doubleWidthVectorType = GetNonGenericDoubleWidthVectorType(instruction.TypeOf, context.CompilationContext);
+
+            //// Combine input vectors into one double-width vector.
+            //EmitValue(instruction.GetOperand(0), context);
+            //EmitValue(instruction.GetOperand(1), context);
+            //context.ILGenerator.Emit(OpCodes.Call, doubleWidthVectorType.GetMethod("Create", [vectorType, vectorType]));
+
+            //// Indices
+            //foreach (var maskValue in maskIndices)
+            //{
+            //    switch (elementSizeInBytes)
+            //    {
+            //        case 4:
+            //            context.ILGenerator.Emit(OpCodes.Ldc_I4, maskValue);
+            //            break;
+
+            //        case 8:
+            //            context.ILGenerator.Emit(OpCodes.Ldc_I8, (long)maskValue);
+            //            break;
+
+            //        default:
+            //            throw new NotImplementedException();
+            //    }
+            //}
+            //var maskValueType = elementSizeInBytes switch
+            //{
+            //    4 => typeof(int),
+            //    8 => typeof(long),
+            //    _ => throw new NotImplementedException()
+            //};
+            //var maskValueTypes = Enumerable.Repeat(maskValueType, maskIndices.Length).ToArray();
+            //context.ILGenerator.Emit(OpCodes.Call, singleWidthVectorType.GetMethod("Create", maskValueTypes));
+
+            //var toDoubleWidthVectorMethodName = vectorSize switch
+            //{
+            //    8 => nameof(Vector64.ToVector128),
+            //    16 => nameof(Vector128.ToVector256),
+            //    32 => nameof(Vector256.ToVector512),
+            //    _ => throw new NotImplementedException()
+            //};
+
+            //context.ILGenerator.Emit(OpCodes.Call, singleWidthVectorType.GetMethod(toDoubleWidthVectorMethodName).MakeGenericMethod(elementType));
+
+            //// Do the shuffle
+            //var doubleWidthGenericVectorType = GetGenericDoubleWidthVectorType(instruction.TypeOf, context.CompilationContext);
+            //context.ILGenerator.Emit(OpCodes.Call, doubleWidthVectorType.GetMethod("Shuffle", [doubleWidthGenericVectorType.MakeGenericType(elementType), doubleWidthGenericVectorType.MakeGenericType(maskValueType)]));
+
+            //// Extract the result.
+            //context.ILGenerator.Emit(OpCodes.Call, doubleWidthVectorType.GetMethod("GetLower").MakeGenericMethod(elementType));
         }
 
         private void EmitInsertElement(LLVMValueRef instruction, FunctionCompilationContext context)
@@ -381,6 +567,10 @@ namespace CLILL
                     context.ILGenerator.Emit(OpCodes.Ceq);
                     break;
 
+                case LLVMRealPredicate.LLVMRealOGT:
+                    context.ILGenerator.Emit(OpCodes.Cgt);
+                    break;
+
                 case LLVMRealPredicate.LLVMRealOLT:
                     context.ILGenerator.Emit(OpCodes.Clt);
                     break;
@@ -398,7 +588,9 @@ namespace CLILL
 
         private void EmitConversion(LLVMValueRef instruction, FunctionCompilationContext context, Signedness signedness)
         {
-            EmitValue(instruction.GetOperand(0), context);
+            var operand = instruction.GetOperand(0);
+            var fromType = operand.TypeOf;
+            EmitValue(operand, context);
 
             var toType = instruction.TypeOf;
             switch (toType.Kind)
@@ -451,6 +643,37 @@ namespace CLILL
                     }
                     break;
 
+                case LLVMTypeKind.LLVMVectorTypeKind:
+                    switch ((fromType.ElementType.Kind, toType.ElementType.Kind))
+                    {
+                        case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMFloatTypeKind):
+                            switch (fromType.ElementType.IntWidth)
+                            {
+                                case 32:
+                                    context.ILGenerator.Emit(OpCodes.Call, GetNonGenericVectorType(fromType, context.CompilationContext).GetMethod("ConvertToSingle", [GetMsilType(operand.TypeOf, context.CompilationContext)]));
+                                    break;
+
+                                default:
+                                    throw new NotImplementedException();
+                            }
+                            break;
+
+                        case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMIntegerTypeKind):
+                            if (fromType.ElementType.IntWidth > toType.ElementType.IntWidth)
+                            {
+                                context.ILGenerator.Emit(OpCodes.Call, typeof(VectorUtility).GetMethod(nameof(VectorUtility.Narrow), [GetMsilType(operand.TypeOf, context.CompilationContext)]));
+                            }
+                            else
+                            {
+                                throw new NotImplementedException();
+                            }
+                            break;
+
+                        default:
+                            throw new NotImplementedException($"Conversion not implemented from vector {fromType} to {toType}: {instruction}");
+                    }
+                    break;
+
                 default:
                     throw new NotImplementedException($"Conversion not implemented to {toType}: {instruction}");
             }
@@ -486,16 +709,12 @@ namespace CLILL
                     {
                         throw new NotImplementedException();
                     }
-                    if (instruction.TypeOf.ElementType.Kind != LLVMTypeKind.LLVMIntegerTypeKind
-                        || instruction.TypeOf.ElementType.IntWidth != 32)
-                    {
-                        throw new NotImplementedException();
-                    }
-                    context.ILGenerator.EmitCall(
-                        OpCodes.Call,
-                        // TODO: Don't do this.
-                        typeof(Vector128).GetMethods().Single(x => x.Name == vectorMethodName && x.GetParameters().Length == 2 && x.GetParameters()[0].ParameterType.Name.Contains("Vector128") && x.GetParameters()[1].ParameterType.Name.Contains("Vector128")),
-                        null);
+                    var nonGenericVectorType = GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext);
+                    var genericVectorType = GetGenericVectorType(instruction.TypeOf, context.CompilationContext).MakeGenericType(Type.MakeGenericMethodParameter(0));
+                    var genericVectorMethod = nonGenericVectorType.GetMethod(vectorMethodName, [genericVectorType, genericVectorType]);
+                    var elementType = GetMsilType(instruction.TypeOf.ElementType, context.CompilationContext);
+                    var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
+                    context.ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
                     break;
 
                 default:
@@ -554,6 +773,7 @@ namespace CLILL
                     LLVMIntPredicate.LLVMIntSLT => OpCodes.Blt,
                     LLVMIntPredicate.LLVMIntSLE => OpCodes.Ble,
                     LLVMIntPredicate.LLVMIntUGT => OpCodes.Bgt_Un,
+                    LLVMIntPredicate.LLVMIntULE => OpCodes.Ble_Un,
                     LLVMIntPredicate.LLVMIntULT => OpCodes.Blt_Un,
                     _ => throw new NotImplementedException($"Branch condition integer comparison {condition.ICmpPredicate} not implemented: {condition}"),
                 };
@@ -610,32 +830,23 @@ namespace CLILL
 
             var functionToCall = operands[^1];
 
+            var functionType = (LLVMTypeRef)LLVM.GetCalledFunctionType(instruction);
+
             var varArgsParameterTypes = Array.Empty<Type>();
-            var isVarArg = false;
-            int numParameters;
-            if (functionToCall.Kind != LLVMValueKind.LLVMConstantPointerNullValueKind)
+            var isVarArg = functionType.IsFunctionVarArg;
+            if (isVarArg)
             {
-                var functionType = (LLVMTypeRef)LLVM.GlobalGetValueType(functionToCall);
-
-                isVarArg = functionType.IsFunctionVarArg;
-                if (isVarArg)
+                var parameters = functionType.ParamTypes;
+                varArgsParameterTypes = new Type[operands.Count - 1 - parameters.Length];
+                for (var i = 0; i < varArgsParameterTypes.Length; i++)
                 {
-                    var parameters = functionType.ParamTypes;
-                    varArgsParameterTypes = new Type[operands.Count - 1 - parameters.Length];
-                    for (var i = 0; i < varArgsParameterTypes.Length; i++)
-                    {
-                        varArgsParameterTypes[i] = GetMsilType(operands[i + parameters.Length].TypeOf, context.CompilationContext);
-                    }
+                    varArgsParameterTypes[i] = GetMsilType(operands[i + parameters.Length].TypeOf, context.CompilationContext);
                 }
-
-                numParameters = (int)functionType.ParamTypesCount;
-            }
-            else
-            {
-                numParameters = operands.Count - 1;
             }
 
-            if (functionToCall.TypeOf.Kind == LLVMTypeKind.LLVMPointerTypeKind)
+            var numParameters = (int)functionType.ParamTypesCount;
+
+            if (functionToCall.Kind != LLVMValueKind.LLVMFunctionValueKind)
             {
                 // This is a function pointer invocation.
 
@@ -678,7 +889,7 @@ namespace CLILL
                 varArgsParameterTypes);
         }
 
-        private static unsafe int GetElementPtrConst(LLVMValueRef constExpr, FunctionCompilationContext context)
+        private static unsafe int GetElementPtrConst(LLVMValueRef constExpr, CompilationContext context)
         {
             var sourceElementType = (LLVMTypeRef)LLVM.GetGEPSourceElementType(constExpr);
             var currentType = sourceElementType;
@@ -690,7 +901,7 @@ namespace CLILL
                 throw new NotImplementedException();
             }
 
-            var sizeInBytes = (long)(context.CompilationContext.GetSizeOfTypeInBytes(currentType));
+            var sizeInBytes = (long)(context.GetSizeOfTypeInBytes(currentType));
             result += (int)(constExpr.GetOperand(1).ConstIntSExt * sizeInBytes);
 
             for (var i = 2u; i < constExpr.OperandCount; i++)
@@ -705,7 +916,7 @@ namespace CLILL
                 switch (currentType.Kind)
                 {
                     case LLVMTypeKind.LLVMArrayTypeKind:
-                        result += (int)index.ConstIntSExt * context.CompilationContext.GetSizeOfTypeInBytes(currentType.ElementType);
+                        result += (int)index.ConstIntSExt * context.GetSizeOfTypeInBytes(currentType.ElementType);
                         currentType = currentType.ElementType;
                         break;
 
@@ -715,7 +926,7 @@ namespace CLILL
 
                     case LLVMTypeKind.LLVMStructTypeKind:
                         uint fieldIndex = (uint)index.ConstIntSExt;
-                        var targetData = LLVM.CreateTargetData(LLVM.GetDataLayout(context.CompilationContext.LLVMModule));
+                        var targetData = LLVM.CreateTargetData(LLVM.GetDataLayout(context.LLVMModule));
                         ulong fieldOffset = LLVM.OffsetOfElement(
                             targetData,
                             currentType,
@@ -830,59 +1041,29 @@ namespace CLILL
 
         private void EmitPhiValues(LLVMBasicBlockRef from, LLVMBasicBlockRef to, FunctionCompilationContext context)
         {
-            // Phi values might refer to each other, e.g.
-            // %2 = phi i32 [ 1, %0 ], [ %5, %1 ]
+            // Phi values might refer to each other recursively, e.g.
+            // %2 = phi i32 [ 1, %0 ], [ %3, %1 ]
             // %3 = phi i32 [ 0, %0 ], [ %2, %1 ]
             //
-            // So we need to emit all reads from phi locals
-            // before the value is written.
+            // ... so we take advantage of the stack-based nature of IL
+            // to push all the phi values to the stack, then pop them
+            // into phi locals.
 
-            var phiInstructionAndIncomingValues = to.GetInstructions()
-                .Where(x => x.InstructionOpcode == LLVMOpcode.LLVMPHI)
-                .Select(x => new PhiInstructionAndIncomingValue(x, x.GetIncomingValueForBlock(from)))
-                .ToList();
+            var phiStack = new Stack<LLVMValueRef>();
 
-            var emittedPhiValues = new HashSet<LLVMValueRef>();
-
-            while (phiInstructionAndIncomingValues.Count > 0)
+            foreach (var phiInstruction in to.GetInstructions()
+                .Where(x => x.InstructionOpcode == LLVMOpcode.LLVMPHI))
             {
-                // Find phi instructions that are not used as the incoming value for any
-                // other phi instructions that we haven't emitted yet.
-                // TODO
-                var next = phiInstructionAndIncomingValues
-                    .Where(x =>
-                    {
-                        foreach (var y in phiInstructionAndIncomingValues)
-                        {
-                            if (x == y)
-                            {
-                                continue;
-                            }
+                var incomingValue = phiInstruction.GetIncomingValueForBlock(from);
+                EmitValue(incomingValue, context);
 
-                            if (y.IncomingValue == x.PhiInstruction
-                                && !emittedPhiValues.Contains(y.PhiInstruction))
-                            {
-                                return false;
-                            }
-                        }
+                phiStack.Push(phiInstruction);
+            }
 
-                        return true;
-                    })
-                    .ToList();
-
-                if (next.Count == 0)
-                {
-                    throw new InvalidOperationException($"Invalid phi values from block {from} to block {to}");
-                }
-
-                foreach (var phiInstructionAndIncomingValue in next)
-                {
-                    EmitValue(phiInstructionAndIncomingValue.IncomingValue, context);
-                    context.ILGenerator.Emit(OpCodes.Stloc, context.PhiLocals[phiInstructionAndIncomingValue.PhiInstruction]);
-
-                    phiInstructionAndIncomingValues.Remove(phiInstructionAndIncomingValue);
-                    emittedPhiValues.Add(phiInstructionAndIncomingValue.PhiInstruction);
-                }
+            while (phiStack.Count > 0)
+            {
+                var phiInstruction = phiStack.Pop();
+                context.ILGenerator.Emit(OpCodes.Stloc, context.PhiLocals[phiInstruction]);
             }
         }
 
@@ -1005,81 +1186,10 @@ namespace CLILL
         {
             if (valueRef.IsConstant)
             {
-                switch (valueRef.Kind)
-                {
-                    case LLVMValueKind.LLVMConstantAggregateZeroValueKind:
-                        switch (valueRef.TypeOf.Kind)
-                        {
-                            case LLVMTypeKind.LLVMVectorTypeKind:
-                                context.ILGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueRef.TypeOf, context.CompilationContext).GetProperty("Zero").GetGetMethod());
-                                break;
-
-                            default:
-                                throw new NotImplementedException($"Constant aggregate zero value not implemented: {valueRef}");
-                        }
-                        break;
-
-                    case LLVMValueKind.LLVMConstantDataVectorValueKind:
-                    case LLVMValueKind.LLVMConstantFPValueKind:
-                    case LLVMValueKind.LLVMConstantIntValueKind:
-                        EmitLoadConstant(context.ILGenerator, valueRef.TypeOf, valueRef, context.CompilationContext);
-                        break;
-
-                    case LLVMValueKind.LLVMConstantExprValueKind:
-                        switch (valueRef.ConstOpcode)
-                        {
-                            case LLVMOpcode.LLVMGetElementPtr:
-                                EmitValue(valueRef.GetOperand(0), context);
-                                context.ILGenerator.Emit(OpCodes.Ldc_I4, GetElementPtrConst(valueRef, context));
-                                context.ILGenerator.Emit(OpCodes.Conv_U);
-                                context.ILGenerator.Emit(OpCodes.Add);
-                                break;
-
-                            default:
-                                throw new NotImplementedException($"Const opcode {valueRef.ConstOpcode} not implemented: {valueRef}");
-                        }
-                        break;
-
-                    case LLVMValueKind.LLVMConstantPointerNullValueKind:
-                        context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
-                        context.ILGenerator.Emit(OpCodes.Conv_U);
-                        break;
-
-                    case LLVMValueKind.LLVMFunctionValueKind:
-                        context.ILGenerator.Emit(OpCodes.Ldftn, GetOrCreateMethod(valueRef, context.CompilationContext));
-                        break;
-
-                    case LLVMValueKind.LLVMGlobalVariableValueKind:
-                        var staticField = context.CompilationContext.Globals[valueRef];
-                        context.ILGenerator.Emit(OpCodes.Ldsflda, staticField);
-                        break;
-
-                    case LLVMValueKind.LLVMPoisonValueValueKind:
-                    case LLVMValueKind.LLVMUndefValueValueKind:
-                        switch (valueRef.TypeOf.Kind)
-                        {
-                            case LLVMTypeKind.LLVMPointerTypeKind:
-                                context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
-                                context.ILGenerator.Emit(OpCodes.Conv_U);
-                                break;
-
-                            case LLVMTypeKind.LLVMVectorTypeKind:
-                                context.ILGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueRef.TypeOf, context.CompilationContext).GetProperty("Zero").GetGetMethod());
-                                break;
-
-                            default:
-                                throw new NotImplementedException();
-                        }
-                        break;
-
-                    default:
-                        throw new NotImplementedException($"Unsupported value kind {valueRef.Kind}: {valueRef}");
-                }
+                EmitConstantValue(valueRef, valueRef.TypeOf, context.ILGenerator, context.CompilationContext);
             }
             else if (context.Locals.TryGetValue(valueRef, out var local))
             {
-                // TODO: Don't do this Vector128 hack
-                //if (forceLdloca || (local.LocalType.IsValueType && !local.LocalType.IsPrimitive && !local.LocalType.IsPointer && !local.LocalType.Name.Contains("Vector128")))
                 if (valueRef.IsAAllocaInst != null)
                 {
                     context.ILGenerator.Emit(OpCodes.Ldloca, local);
@@ -1101,9 +1211,161 @@ namespace CLILL
             {
                 CompileInstructionValue(valueRef, context);
             }
+            else if (valueRef.IsAInstruction != null)
+            {
+                // We get here if an assignment is used before it's assigned.
+                var newLocal = context.ILGenerator.DeclareLocal(GetMsilType(valueRef.TypeOf, context.CompilationContext));
+                context.Locals.Add(valueRef, newLocal);
+
+                if (valueRef.IsAAllocaInst != null)
+                {
+                    context.ILGenerator.Emit(OpCodes.Ldloca, newLocal);
+                }
+                else
+                {
+                    context.ILGenerator.Emit(OpCodes.Ldloc, newLocal);
+                }
+            }
             else
             {
                 throw new InvalidOperationException($"Unexpected value: {valueRef}");
+            }
+        }
+
+        private void EmitConstantValue(
+            LLVMValueRef valueRef, 
+            LLVMTypeRef valueTypeRef,
+            ILGenerator ilGenerator, 
+            CompilationContext context)
+        {
+            switch (valueRef.Kind)
+            {
+                case LLVMValueKind.LLVMConstantAggregateZeroValueKind:
+                    switch (valueTypeRef.Kind)
+                    {
+                        case LLVMTypeKind.LLVMVectorTypeKind:
+                            ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetProperty("Zero").GetGetMethod());
+                            break;
+
+                        default:
+                            throw new NotImplementedException($"Constant aggregate zero value not implemented: {valueRef}");
+                    }
+                    break;
+
+                case LLVMValueKind.LLVMConstantDataArrayValueKind:
+                case LLVMValueKind.LLVMConstantArrayValueKind:
+                    EmitLoadConstantArray(ilGenerator, context, valueRef, valueTypeRef);
+                    break;
+
+                case LLVMValueKind.LLVMConstantDataVectorValueKind:
+                case LLVMValueKind.LLVMConstantVectorValueKind:
+                    EmitLoadConstantVector(ilGenerator, context, valueRef, valueTypeRef);
+                    break;
+
+                case LLVMValueKind.LLVMConstantFPValueKind:
+                    switch (valueTypeRef.Kind)
+                    {
+                        case LLVMTypeKind.LLVMDoubleTypeKind:
+                            ilGenerator.Emit(OpCodes.Ldc_R8, valueRef.GetConstRealDouble(out _));
+                            break;
+
+                        case LLVMTypeKind.LLVMFloatTypeKind:
+                            ilGenerator.Emit(OpCodes.Ldc_R4, (float)valueRef.GetConstRealDouble(out _));
+                            break;
+
+                        default:
+                            throw new NotImplementedException();
+                    }
+                    break;
+
+                case LLVMValueKind.LLVMConstantIntValueKind:
+                    switch (valueTypeRef.IntWidth)
+                    {
+                        case 1:
+                        case 8:
+                        case 16:
+                        case 32:
+                            ilGenerator.Emit(OpCodes.Ldc_I4, (int)valueRef.ConstIntZExt);
+                            break;
+
+                        case 64:
+                            ilGenerator.Emit(OpCodes.Ldc_I8, valueRef.ConstIntSExt);
+                            break;
+
+                        default:
+                            throw new NotImplementedException($"Load constant integer width {valueTypeRef.IntWidth} not implemented: {valueRef}");
+                    }
+                    break;
+
+                case LLVMValueKind.LLVMConstantExprValueKind:
+                    switch (valueRef.ConstOpcode)
+                    {
+                        case LLVMOpcode.LLVMGetElementPtr:
+                            EmitConstantValue(valueRef.GetOperand(0), valueRef.GetOperand(0).TypeOf, ilGenerator, context);
+                            ilGenerator.Emit(OpCodes.Ldc_I4, GetElementPtrConst(valueRef, context));
+                            ilGenerator.Emit(OpCodes.Conv_U);
+                            ilGenerator.Emit(OpCodes.Add);
+                            break;
+
+                        default:
+                            throw new NotImplementedException($"Const opcode {valueRef.ConstOpcode} not implemented: {valueRef}");
+                    }
+                    break;
+
+                case LLVMValueKind.LLVMConstantPointerNullValueKind:
+                    ilGenerator.Emit(OpCodes.Ldc_I4_0);
+                    ilGenerator.Emit(OpCodes.Conv_U);
+                    break;
+
+                case LLVMValueKind.LLVMConstantStructValueKind:
+                    EmitLoadConstantStruct(ilGenerator, context, valueRef, GetMsilType(valueTypeRef, context));
+                    break;
+
+                case LLVMValueKind.LLVMFunctionValueKind:
+                    ilGenerator.Emit(OpCodes.Ldftn, GetOrCreateMethod(valueRef, context));
+                    break;
+
+                case LLVMValueKind.LLVMGlobalVariableValueKind:
+                    var staticField = context.Globals[valueRef];
+                    ilGenerator.Emit(OpCodes.Ldsflda, staticField);
+                    break;
+
+                case LLVMValueKind.LLVMPoisonValueValueKind:
+                case LLVMValueKind.LLVMUndefValueValueKind:
+                    switch (valueTypeRef.Kind)
+                    {
+                        case LLVMTypeKind.LLVMFloatTypeKind:
+                            ilGenerator.Emit(OpCodes.Ldc_R4, 0.0f);
+                            break;
+
+                        case LLVMTypeKind.LLVMIntegerTypeKind:
+                            switch (valueTypeRef.IntWidth)
+                            {
+                                case 32:
+                                    ilGenerator.Emit(OpCodes.Ldc_I4_0);
+                                    break;
+
+                                default:
+                                    throw new NotImplementedException();
+                            }
+                            break;
+
+                        case LLVMTypeKind.LLVMPointerTypeKind:
+                            ilGenerator.Emit(OpCodes.Ldc_I4_0);
+                            ilGenerator.Emit(OpCodes.Conv_U);
+                            break;
+
+                        case LLVMTypeKind.LLVMVectorTypeKind:
+                            ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetProperty("Zero").GetGetMethod());
+                            break;
+
+                        default:
+                            throw new NotImplementedException($"Unsupported poison / undef value kind {valueRef.Kind}: {valueRef}");
+                    }
+                    break;
+
+                default:
+                    throw new NotImplementedException($"Unsupported value kind {valueRef.Kind}: {valueRef}");
             }
         }
 
@@ -1114,16 +1376,12 @@ namespace CLILL
             var valueRef = instruction.GetOperand(0);
 
             EmitValue(valueRef, context);
+            EmitLoadIndirect(instruction.TypeOf, context);
+        }
 
-            // TODO: Find better way to do this.
-            //if (valueRef.IsAAllocaInst != null)
-            //{
-
-            //    // We'll have emitted ldloc instruction, no need to dereference pointer.
-            //    return;
-            //}
-
-            switch (instruction.TypeOf.Kind)
+        private void EmitLoadIndirect(LLVMTypeRef typeRef, FunctionCompilationContext context)
+        {
+            switch (typeRef.Kind)
             {
                 case LLVMTypeKind.LLVMFloatTypeKind:
                     context.ILGenerator.Emit(OpCodes.Ldind_R4);
@@ -1134,8 +1392,9 @@ namespace CLILL
                     break;
 
                 case LLVMTypeKind.LLVMIntegerTypeKind:
-                    switch (instruction.TypeOf.IntWidth)
+                    switch (typeRef.IntWidth)
                     {
+                        case 1:
                         case 8:
                             context.ILGenerator.Emit(OpCodes.Ldind_I1);
                             break;
@@ -1153,7 +1412,7 @@ namespace CLILL
                             break;
 
                         default:
-                            throw new NotImplementedException($"Int width {instruction.TypeOf.IntWidth} not implemented");
+                            throw new NotImplementedException($"Int width {typeRef.IntWidth} not implemented: {typeRef}");
                     }
                     break;
 
@@ -1162,11 +1421,11 @@ namespace CLILL
                     break;
 
                 case LLVMTypeKind.LLVMVectorTypeKind:
-                    context.ILGenerator.Emit(OpCodes.Ldobj, GetMsilType(instruction.TypeOf, context.CompilationContext));
+                    context.ILGenerator.Emit(OpCodes.Ldobj, GetMsilType(typeRef, context.CompilationContext));
                     break;
 
                 default:
-                    throw new NotImplementedException($"Unsupported type {instruction.TypeOf.Kind}");
+                    throw new NotImplementedException($"Unsupported type {typeRef.Kind}");
             }
         }
 
@@ -1175,8 +1434,12 @@ namespace CLILL
             LLVMValueRef instruction, 
             FunctionCompilationContext context)
         {
-            var local = ilGenerator.DeclareLocal(GetMsilType(instruction.TypeOf, context.CompilationContext));
-            context.Locals.Add(instruction, local);
+            // TODO: Declare locals upfront.
+            if (!context.Locals.TryGetValue(instruction, out var local))
+            {
+                local = ilGenerator.DeclareLocal(GetMsilType(instruction.TypeOf, context.CompilationContext));
+                context.Locals.Add(instruction, local);
+            }
             EmitStloc(ilGenerator, instruction, instruction.TypeOf, context);
         }
 

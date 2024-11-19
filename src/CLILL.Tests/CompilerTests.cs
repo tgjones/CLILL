@@ -12,7 +12,27 @@ namespace CLILL.Tests
     {
         private static IEnumerable<object[]> TestData()
         {
-            var testFiles = Directory.GetFiles("TestPrograms", "*.c", SearchOption.AllDirectories);
+            var testFiles = Directory
+                .GetFiles("TestPrograms", "*.c", SearchOption.AllDirectories)
+                .Where(x =>
+                {
+                    switch (Path.GetFileNameWithoutExtension(x))
+                    {
+                        // These tests are not supported on Windows because they use `extern int printf(...)`
+                        // which isn't compatible with Microsoft's C runtime.
+                        case "00210":
+                        case "00211":
+                        case "00213":
+                        case "00214":
+                        case "00215":
+                        case "00217":
+                        case "00218":
+                            return false;
+
+                        default:
+                            return true;
+                    }
+                });
 
             var optimizationLevels = new string[]
             {
@@ -70,6 +90,60 @@ namespace CLILL.Tests
 
             Console.WriteLine($"ExitCode: {managedExitCode}");
             Console.WriteLine($"Stdout: {managedStandardOutput}");
+        }
+
+        [TestMethod]
+        [DataRow("O0")]
+        [DataRow("O3")]
+        public void BenchmarkMandelbrot(string optimizationLevel)
+        {
+            var sourceFilePath = Path.Combine(Environment.CurrentDirectory, "TestPrograms", "mandelbrot", "benchmarks.c");
+
+            var fullTestName = $"{Path.GetFileNameWithoutExtension(sourceFilePath)}_{optimizationLevel}";
+
+            var irPath = fullTestName + ".ll";
+            var binaryPath = fullTestName + "_native.exe";
+
+            // Compile to LLVM IR.
+            RunClang([sourceFilePath, "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}"]);
+
+            // Compile to executable binary.
+            RunClang([sourceFilePath, "-o", binaryPath, $"-{optimizationLevel}"]);
+
+            var outputPath = $"{fullTestName}.exe";
+
+            using (var compiler = new Compiler())
+            using (var source = LLVMSourceCode.FromFile(irPath))
+            {
+                compiler.Compile(source, outputPath);
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+
+            RunProgram(
+                "dotnet",
+                [outputPath],
+                out var managedExitCode,
+                out var managedStandardOutput,
+                out var managedStandardError);
+
+            Console.WriteLine($"Managed: {stopwatch.Elapsed}");
+
+            stopwatch.Restart();
+
+            RunProgram(
+                binaryPath,
+                [],
+                out var llvmExitCode,
+                out var llvmStandardOutput,
+                out var llvmStandardError);
+
+            Console.WriteLine($"Native:  {stopwatch.Elapsed}");
+
+            Assert.AreEqual(llvmExitCode, managedExitCode, managedStandardError);
+
+            Console.WriteLine($"Managed Stdout: {managedStandardOutput}");
+            Console.WriteLine($"Native  Stdout: {llvmStandardOutput}");
         }
 
         private static void RunProgram(

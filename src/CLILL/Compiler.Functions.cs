@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using CLILL.Runtime;
 using LLVMSharp.Interop;
 
 namespace CLILL
@@ -15,14 +16,63 @@ namespace CLILL
         {
             if (!context.Functions.TryGetValue(function, out var method))
             {
-                if (function.IsDeclaration 
-                    && !function.Name.StartsWith("llvm.memcpy")
-                    && !function.Name.StartsWith("llvm.memset"))
+                if (function.IsDeclaration)
                 {
                     switch (function.Name)
                     {
+                        case "llvm.assume":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.Assume));
+
+                        case "llvm.fabs.f32":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.FAbsF32));
+
+                        case "llvm.fmuladd.f32":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.FMulAddF32));
+
+                        case "llvm.fmuladd.f64":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.FMulAddF64));
+
+                        case "llvm.fmuladd.v2f64":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.FMulAddV2F64));
+
+                        case "llvm.lifetime.end.p0":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.LifetimeEndP0));
+
+                        case "llvm.lifetime.start.p0":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.LifetimeStartP0));
+
+                        case "llvm.memcpy.p0.p0.i64":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.MemCpyI64));
+
+                        case "llvm.memset.p0.i64":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.MemSetI64));
+
+                        case "llvm.smax.i32":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.SMaxI32));
+
+                        case "llvm.smax.v4i32":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.SMaxV4I32));
+
+                        case "llvm.sqrt.f32":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.SqrtF32));
+
+                        case "llvm.sqrt.f64":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.SqrtF64));
+
+                        case "llvm.stackrestore":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.StackRestore));
+
+                        case "llvm.stacksave":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.StackSave));
+
                         case "llvm.vector.reduce.add.v4i32":
-                            return typeof(Vector128).GetMethod("Sum").MakeGenericMethod(typeof(int));
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.VectorReduceAddV4I32));
+
+                        case "llvm.vector.reduce.smax.v4i32":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.VectorReduceSMaxV4I32));
+
+                        case var _ when function.Name.StartsWith("llvm."):
+                            throw new NotImplementedException($"Unknown LLVM intrinsic: {function.Name}");
 
                         default:
                             // TODO: We assume all extern function are part of C runtime.
@@ -77,30 +127,6 @@ namespace CLILL
             CompilationContext context)
         {
             var ilGenerator = methodBuilder.GetILGenerator();
-
-            if (function.Name == "llvm.memcpy.p0.p0.i64")
-            {
-                ilGenerator.Emit(OpCodes.Ldarg_1);
-                ilGenerator.Emit(OpCodes.Ldarg_0);
-                ilGenerator.Emit(OpCodes.Ldarg_2);
-                ilGenerator.Emit(OpCodes.Conv_U);
-                ilGenerator.Emit(OpCodes.Call, typeof(NativeMemory).GetMethod("Copy"));
-                ilGenerator.Emit(OpCodes.Ret);
-                return methodBuilder;
-            }
-
-            if (function.Name == "llvm.memset.p0.i64")
-            {
-                // declare void @llvm.memset.p0.i64(ptr <dest>, i8 <val>, i64<len>, i1<isvolatile>)
-                // public static void Fill (void* ptr, UIntPtr byteCount, byte value);
-                ilGenerator.Emit(OpCodes.Ldarg_0);
-                ilGenerator.Emit(OpCodes.Ldarg_2);
-                ilGenerator.Emit(OpCodes.Conv_U);
-                ilGenerator.Emit(OpCodes.Ldarg_1);
-                ilGenerator.Emit(OpCodes.Call, typeof(NativeMemory).GetMethod("Fill"));
-                ilGenerator.Emit(OpCodes.Ret);
-                return methodBuilder;
-            }
 
             // Figure out which instructions need their results stored in local variables,
             // and which can be pushed to the stack.

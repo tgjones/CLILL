@@ -1,11 +1,13 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.28701.123
+# Visual Studio Version 17
+VisualStudioVersion = 17.12.35506.116 d17.12
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CLILL", "CLILL\CLILL.csproj", "{5A5CAB34-9733-4E7D-A27F-24CB756C396E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CLILL.Tests", "CLILL.Tests\CLILL.Tests.csproj", "{846070D3-3AD0-4AC1-9885-23B02FB50D04}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CLILL.Runtime", "CLILL.Runtime\CLILL.Runtime.csproj", "{AB3A1CF5-7A6F-42FE-82FE-2D4B016C9464}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +23,10 @@ Global
 		{846070D3-3AD0-4AC1-9885-23B02FB50D04}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{846070D3-3AD0-4AC1-9885-23B02FB50D04}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{846070D3-3AD0-4AC1-9885-23B02FB50D04}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AB3A1CF5-7A6F-42FE-82FE-2D4B016C9464}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AB3A1CF5-7A6F-42FE-82FE-2D4B016C9464}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AB3A1CF5-7A6F-42FE-82FE-2D4B016C9464}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AB3A1CF5-7A6F-42FE-82FE-2D4B016C9464}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
