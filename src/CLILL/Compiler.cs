@@ -133,6 +133,12 @@ namespace CLILL
                   }
                 }
                 """);
+
+            var runtimeDll = "CLILL.Runtime.dll";
+            File.Copy(
+                runtimeDll, 
+                Path.Combine(Path.GetDirectoryName(outputPath), runtimeDll),
+                true);
         }
 
         private static MethodBuilder CreateMainMethod(TypeBuilder typeBuilder, MethodInfo entryPoint)

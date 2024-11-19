@@ -35,7 +35,7 @@ public static unsafe class LLVMIntrinsics
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void MemCpyI64(void* dest, void* src, long length) => NativeMemory.Copy(src, dest, (nuint)length);
+    public static void MemCpyI64(void* dest, void* src, long length, bool isVolatile) => NativeMemory.Copy(src, dest, (nuint)length);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void MemSetI64(void* dest, byte val, long length, bool isVolatile)
@@ -51,6 +51,12 @@ public static unsafe class LLVMIntrinsics
     public static Vector128<int> SMaxV4I32(Vector128<int> val1, Vector128<int> val2) => Vector128.Max(val1, val2);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float SqrtF32(float val) => MathF.Sqrt(val);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static double SqrtF64(double val) => Math.Sqrt(val);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void StackRestore(void* ptr)
     {
         // TODO: We don't really support this. Ideally emit a warning.
@@ -64,13 +70,28 @@ public static unsafe class LLVMIntrinsics
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float SqrtF32(float val) => MathF.Sqrt(val);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static double SqrtF64(double val) => Math.Sqrt(val);
+    public static int USubSatI32(int a, int b) => Math.Max(a - b, 0);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int VectorReduceAddV4I32(Vector128<int> vector) => Vector128.Sum(vector);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int VectorReduceMulV4I32(Vector128<int> vector)
+    {
+        if (Sse41.IsSupported)
+        {
+            // Multiply pairs of elements
+            var temp = Sse41.MultiplyLow(vector, Sse41.Shuffle(vector, 0b_10_11_00_01));
+            temp = Sse41.MultiplyLow(temp, Sse41.Shuffle(temp, 0b_01_00_11_10));
+
+            // Extract the scalar result
+            return Sse41.Extract(temp, 0);
+        }
+        else
+        {
+            throw new PlatformNotSupportedException();
+        }
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int VectorReduceSMaxV4I32(Vector128<int> vector)

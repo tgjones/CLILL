@@ -1243,12 +1243,20 @@ namespace CLILL
                 case LLVMValueKind.LLVMConstantAggregateZeroValueKind:
                     switch (valueTypeRef.Kind)
                     {
+                        case LLVMTypeKind.LLVMArrayTypeKind:
+                            EmitLoadConstantArray(ilGenerator, context, valueRef, valueTypeRef);
+                            break;
+
+                        case LLVMTypeKind.LLVMStructTypeKind:
+                            EmitLoadConstantStruct(ilGenerator, context, valueRef, GetMsilType(valueTypeRef, context));
+                            break;
+
                         case LLVMTypeKind.LLVMVectorTypeKind:
                             ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetProperty("Zero").GetGetMethod());
                             break;
 
                         default:
-                            throw new NotImplementedException($"Constant aggregate zero value not implemented: {valueRef}");
+                            throw new NotImplementedException($"Constant aggregate zero value {valueTypeRef.Kind} not implemented: {valueRef}");
                     }
                     break;
 
@@ -1334,6 +1342,10 @@ namespace CLILL
                 case LLVMValueKind.LLVMUndefValueValueKind:
                     switch (valueTypeRef.Kind)
                     {
+                        case LLVMTypeKind.LLVMArrayTypeKind:
+                            EmitLoadConstantArray(ilGenerator, context, valueRef, valueTypeRef);
+                            break;
+
                         case LLVMTypeKind.LLVMFloatTypeKind:
                             ilGenerator.Emit(OpCodes.Ldc_R4, 0.0f);
                             break;
@@ -1355,12 +1367,16 @@ namespace CLILL
                             ilGenerator.Emit(OpCodes.Conv_U);
                             break;
 
+                        case LLVMTypeKind.LLVMStructTypeKind:
+                            EmitLoadConstantStruct(ilGenerator, context, valueRef, GetMsilType(valueTypeRef, context));
+                            break;
+
                         case LLVMTypeKind.LLVMVectorTypeKind:
                             ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetProperty("Zero").GetGetMethod());
                             break;
 
                         default:
-                            throw new NotImplementedException($"Unsupported poison / undef value kind {valueRef.Kind}: {valueRef}");
+                            throw new NotImplementedException($"Unsupported poison / undef value type kind {valueTypeRef.Kind}: {valueRef}");
                     }
                     break;
 

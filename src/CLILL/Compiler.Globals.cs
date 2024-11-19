@@ -117,19 +117,27 @@ namespace CLILL
             ilGenerator.Emit(OpCodes.Ldloca, local);
             ilGenerator.Emit(OpCodes.Initobj, msilType);
 
-            var elementSizeInBytes = context.GetSizeOfTypeInBytes(arrayOrVectorValueType.ElementType);
-            for (var i = 0; i < length; i++)
+            switch (arrayOrVectorValue.Kind)
             {
-                ilGenerator.Emit(OpCodes.Ldloca, local);
-                if (i > 0)
-                {
-                    ilGenerator.Emit(OpCodes.Ldc_I4, i * elementSizeInBytes);
-                    ilGenerator.Emit(OpCodes.Conv_U);
-                    ilGenerator.Emit(OpCodes.Add);
-                }
-                var elementValue = arrayOrVectorValue.GetAggregateElement((uint)i);
-                EmitConstantValue(elementValue, arrayOrVectorValueType.ElementType, ilGenerator, context);
-                EmitStoreIndirect(ilGenerator, arrayOrVectorValueType.ElementType, context);
+                case LLVMValueKind.LLVMConstantArrayValueKind:
+                case LLVMValueKind.LLVMConstantDataArrayValueKind:
+                case LLVMValueKind.LLVMConstantDataVectorValueKind:
+                case LLVMValueKind.LLVMConstantVectorValueKind:
+                    var elementSizeInBytes = context.GetSizeOfTypeInBytes(arrayOrVectorValueType.ElementType);
+                    for (var i = 0; i < length; i++)
+                    {
+                        ilGenerator.Emit(OpCodes.Ldloca, local);
+                        if (i > 0)
+                        {
+                            ilGenerator.Emit(OpCodes.Ldc_I4, i * elementSizeInBytes);
+                            ilGenerator.Emit(OpCodes.Conv_U);
+                            ilGenerator.Emit(OpCodes.Add);
+                        }
+                        var elementValue = arrayOrVectorValue.GetAggregateElement((uint)i);
+                        EmitConstantValue(elementValue, arrayOrVectorValueType.ElementType, ilGenerator, context);
+                        EmitStoreIndirect(ilGenerator, arrayOrVectorValueType.ElementType, context);
+                    }
+                    break;
             }
 
             ilGenerator.Emit(OpCodes.Ldloc, local);
@@ -146,13 +154,16 @@ namespace CLILL
             ilGenerator.Emit(OpCodes.Ldloca, local);
             ilGenerator.Emit(OpCodes.Initobj, structType);
 
-            var structFields = structType.GetFields();
-            for (var i = 0; i < structFields.Length; i++)
+            if (structValue.Kind == LLVMValueKind.LLVMConstantStructValueKind)
             {
-                ilGenerator.Emit(OpCodes.Ldloca, local);
-                var elementValue = structValue.GetAggregateElement((uint)i);
-                EmitConstantValue(elementValue, elementValue.TypeOf, ilGenerator, context);
-                ilGenerator.Emit(OpCodes.Stfld, structFields[i]);
+                var structFields = structType.GetFields();
+                for (var i = 0; i < structFields.Length; i++)
+                {
+                    ilGenerator.Emit(OpCodes.Ldloca, local);
+                    var elementValue = structValue.GetAggregateElement((uint)i);
+                    EmitConstantValue(elementValue, elementValue.TypeOf, ilGenerator, context);
+                    ilGenerator.Emit(OpCodes.Stfld, structFields[i]);
+                }
             }
 
             ilGenerator.Emit(OpCodes.Ldloc, local);
@@ -183,76 +194,8 @@ namespace CLILL
                     break;
 
                 default:
-                    var vectorTypeMsil = GetMsilVectorType(vectorType, context);
                     EmitLoadConstantArrayOrVector(ilGenerator, context, vectorValue, vectorType, (int)vectorType.VectorSize);
                     break;
-            }
-        }
-
-        private void EmitLoadConstant(
-            ILGenerator ilGenerator, 
-            LLVMTypeRef type, 
-            LLVMValueRef value,
-            CompilationContext context)
-        {
-            switch (type.Kind)
-            {
-                case LLVMTypeKind.LLVMArrayTypeKind:
-                    EmitLoadConstantArray(ilGenerator, context, value, value.TypeOf);
-                    break;
-
-                case LLVMTypeKind.LLVMFloatTypeKind:
-                    ilGenerator.Emit(OpCodes.Ldc_R4, (float)value.GetConstRealDouble(out _));
-                    break;
-
-                case LLVMTypeKind.LLVMDoubleTypeKind:
-                    ilGenerator.Emit(OpCodes.Ldc_R8, value.GetConstRealDouble(out _));
-                    break;
-
-                case LLVMTypeKind.LLVMIntegerTypeKind:
-                    switch (type.IntWidth)
-                    {
-                        case 1:
-                        case 8:
-                        case 16:
-                        case 32:
-                            ilGenerator.Emit(OpCodes.Ldc_I4, (int)value.ConstIntZExt);
-                            break;
-
-                        case 64:
-                            ilGenerator.Emit(OpCodes.Ldc_I8, value.ConstIntSExt);
-                            break;
-
-                        default:
-                            throw new NotImplementedException($"Load constant integer width {type.IntWidth} not implemented: {value}");
-                    }
-                    break;
-
-                case LLVMTypeKind.LLVMPointerTypeKind:
-                    if (context.Globals.TryGetValue(value, out var globalField))
-                    {
-                        ilGenerator.Emit(OpCodes.Ldsflda, context.Globals[value]);
-                    }
-                    else if (value.Kind == LLVMValueKind.LLVMFunctionValueKind)
-                    {
-                        ilGenerator.Emit(OpCodes.Ldftn, GetOrCreateMethod(value, context));
-                    }
-                    else
-                    {
-                        throw new NotImplementedException();
-                    }
-                    break;
-
-                case LLVMTypeKind.LLVMStructTypeKind:
-                    EmitLoadConstantStruct(ilGenerator, context, value, GetMsilType(type, context));
-                    break;
-
-                case LLVMTypeKind.LLVMVectorTypeKind:
-                    EmitLoadConstantVector(ilGenerator, context, value, type);
-                    break;
-
-                default:
-                    throw new NotImplementedException($"Type {type.Kind} not implemented: {type}");
             }
         }
 

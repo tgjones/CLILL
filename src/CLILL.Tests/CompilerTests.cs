@@ -12,8 +12,11 @@ namespace CLILL.Tests
     {
         private static IEnumerable<object[]> TestData()
         {
-            var testFiles = Directory
-                .GetFiles("TestPrograms", "*.c", SearchOption.AllDirectories)
+            var cFiles = Directory.GetFiles("TestPrograms", "*.c", SearchOption.AllDirectories);
+            var cppFiles = Directory.GetFiles("TestPrograms", "*.cpp", SearchOption.AllDirectories);
+
+            var testFiles = cFiles
+                .Concat(cppFiles)
                 .Where(x =>
                 {
                     switch (Path.GetFileNameWithoutExtension(x))

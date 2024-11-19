@@ -65,8 +65,14 @@ namespace CLILL
                         case "llvm.stacksave":
                             return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.StackSave));
 
+                        case "llvm.usub.sat.i32":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.USubSatI32));
+
                         case "llvm.vector.reduce.add.v4i32":
                             return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.VectorReduceAddV4I32));
+
+                        case "llvm.vector.reduce.mul.v4i32":
+                            return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.VectorReduceMulV4I32));
 
                         case "llvm.vector.reduce.smax.v4i32":
                             return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.VectorReduceSMaxV4I32));
