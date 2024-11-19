@@ -1002,8 +1002,28 @@ EXPORT int benchmark_radix(uint32_t iterations) {
 
 int main()
 {
-#if defined(BENCHMARK_MANDELBROT)
+#if defined(BENCHMARK_FIBONACCI)
+	float result = benchmark_fibonacci(46);
+#elif defined(BENCHMARK_MANDELBROT)
     float result = benchmark_mandelbrot(1920, 1080, 8);
+#elif defined(BENCHMARK_NBODY)
+	float result = benchmark_nbody(1000000);
+#elif defined(BENCHMARK_SIEVE_OF_ERATOSTHENES)
+	float result = benchmark_sieve_of_eratosthenes(1000000);
+#elif defined(BENCHMARK_PIXAR_RAYTRACER)
+	float result = benchmark_pixar_raytracer(720, 480, 16);
+#elif defined(BENCHMARK_FIREFLIES_FLOCKING)
+	float result = benchmark_fireflies_flocking(1000, 100);
+#elif defined(BENCHMARK_POLYNOMIALS)
+	float result = benchmark_polynomials(10000000);
+#elif defined(BENCHMARK_PARTICLE_KINEMATICS)
+	float result = benchmark_particle_kinematics(1000, 10000000);
+#elif defined(BENCHMARK_ARCFOUR)
+	float result = benchmark_arcfour(10000000);
+#elif defined(BENCHMARK_SEAHASH)
+	float result = benchmark_seahash(1000000);
+#elif defined(BENCHMARK_RADIX)
+	float result = benchmark_radix(1000000);
 #else
 #error No benchmark selected
 #endif

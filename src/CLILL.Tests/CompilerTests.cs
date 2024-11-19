@@ -101,13 +101,29 @@ namespace CLILL.Tests
             Console.WriteLine($"Stdout: {managedStandardOutput}");
         }
 
-        private static IEnumerable<object[]> TestDataBenchmarks() => TestFiles(
-            Directory
-            .GetFiles(Path.Combine("TestPrograms", "benchmarks"), "*.*", SearchOption.AllDirectories));
-
         [TestMethod]
+        [DataRow("Fibonacci", "O0")]
+        [DataRow("Fibonacci", "O3")]
         [DataRow("Mandelbrot", "O0")]
         [DataRow("Mandelbrot", "O3")]
+        [DataRow("NBody", "O0")]
+        [DataRow("NBody", "O3")]
+        [DataRow("Sieve_of_Eratosthenes", "O0")]
+        [DataRow("Sieve_of_Eratosthenes", "O3")]
+        [DataRow("Pixar_Raytracer", "O0")]
+        [DataRow("Pixar_Raytracer", "O3")]
+        [DataRow("Fireflies_Flocking", "O0")]
+        [DataRow("Fireflies_Flocking", "O3")]
+        [DataRow("Polynomials", "O0")]
+        [DataRow("Polynomials", "O3")]
+        [DataRow("Particle_Kinematics", "O0")]
+        [DataRow("Particle_Kinematics", "O3")]
+        [DataRow("Arcfour", "O0")]
+        [DataRow("Arcfour", "O3")]
+        [DataRow("Seahash", "O0")]
+        [DataRow("Seahash", "O3")]
+        [DataRow("Radix", "O0")]
+        [DataRow("Radix", "O3")]
         public void Benchmark(string benchmark, string optimizationLevel)
         {
             var testName = Path.Combine("TestPrograms", "benchmarks", "benchmarks.c");
