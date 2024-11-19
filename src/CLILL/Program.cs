@@ -4,11 +4,7 @@
     {
         public static void Main(string[] args)
         {
-            using (var compiler = new Compiler())
-            using (var source = LLVMSourceCode.FromFile(args[0]))
-            {
-                compiler.Compile(source, args[1]);
-            }
+            Compiler.Compile(args[0], args[1]);
         }
     }
 }

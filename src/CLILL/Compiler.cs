@@ -13,19 +13,29 @@ namespace CLILL
 {
     public sealed partial class Compiler : IDisposable
     {
+        public static void Compile(string inputPath, string outputPath)
+        {
+            using var compiler = new Compiler(inputPath);
+
+            compiler.Compile(outputPath);
+        }
+
         private readonly LLVMContextRef _context;
+        private readonly LLVMModuleRef _module;
 
         private readonly Queue<(LLVMValueRef, MethodBuilder)> _methodsToCompile = new();
 
-        public Compiler()
+        public Compiler(string inputPath)
         {
             _context = LLVMContextRef.Create();
+
+            using var source = LLVMSourceCode.FromFile(inputPath);
+
+            _module = _context.ParseIR(source.MemoryBuffer);
         }
 
-        public void Compile(LLVMSourceCode source, string outputPath)
+        private void Compile(string outputPath)
         {
-            using var module = _context.ParseIR(source.MemoryBuffer);
-
             var outputName = Path.GetFileNameWithoutExtension(outputPath);
 
             var assemblyName = new AssemblyName(outputName);
@@ -49,7 +59,7 @@ namespace CLILL
                 TypeAttributes.Public);
 
             var compilationContext = new CompilationContext(
-                module,
+                _module,
                 assemblyBuilder,
                 dynamicModule,
                 typeBuilder);
@@ -58,7 +68,7 @@ namespace CLILL
 
             MethodInfo entryPoint = null;
 
-            var function = module.FirstFunction;
+            var function = _module.FirstFunction;
             while (function.Handle != IntPtr.Zero)
             {
                 if (function.Name.StartsWith("llvm."))
@@ -194,6 +204,7 @@ namespace CLILL
 
         public void Dispose()
         {
+            _module.Dispose();
             _context.Dispose();
         }
     }

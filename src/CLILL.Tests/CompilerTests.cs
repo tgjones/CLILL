@@ -11,9 +11,28 @@ namespace CLILL.Tests
     [TestClass]
     public class CompilerTests
     {
+        private static IEnumerable<object[]> TestFiles(IEnumerable<string> testFiles)
+        {
+            var optimizationLevels = new string[]
+            {
+                "O0",
+                "O3",
+            };
+
+            return from testFile in testFiles
+                   from optimizationLevel in optimizationLevels
+                   select new object[] { testFile, optimizationLevel };
+        }
+
+        private static IEnumerable<object[]> TestDataArbitrary()
+        {
+            return TestFiles(Directory
+                .GetFiles(Path.Combine("TestPrograms", "arbitrary"), "*.*", SearchOption.AllDirectories));
+        }
+
         private static IEnumerable<object[]> TestDataCTestSuite()
         {
-            var testFiles = Directory
+            return TestFiles(Directory
                 .GetFiles(Path.Combine("TestPrograms", "c-testsuite"), "*.c", SearchOption.AllDirectories)
                 .Where(x =>
                 {
@@ -39,54 +58,57 @@ namespace CLILL.Tests
                         default:
                             return true;
                     }
-                });
-
-            var optimizationLevels = new string[]
-            {
-                "O0",
-                "O3",
-            };
-
-            return from testFile in testFiles
-                   from optimizationLevel in optimizationLevels
-                   select new object[] { testFile, optimizationLevel };
+                }));
         }
 
-        public static string TestDataCTestSuiteDisplayName(MethodInfo methodInfo, object[] values)
+        public static string TestDataDisplayName(MethodInfo methodInfo, object[] values)
         {
-            return $"CTestSuite({Path.GetFileName((string)values[0])}, {values[1]})";
+            return $"{methodInfo.Name}({Path.GetFileName((string)values[0])}, {values[1]})";
         }
 
         [TestMethod]
-        [DynamicData(nameof(TestDataCTestSuite), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataCTestSuiteDisplayName))]
-        public void CTestSuite(string testName, string optimizationLevel)
+        [DynamicData(nameof(TestDataArbitrary), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
+        public void Arbitrary(string testName, string optimizationLevel)
         {
-            var sourceFilePath = Path.Combine(Environment.CurrentDirectory, testName);
+            CompileAndExecuteManaged(
+                testName,
+                optimizationLevel,
+                out var managedExitCode,
+                out var managedStandardOutput,
+                out var managedStandardError);
 
-            var fullTestName = $"{testName}_{optimizationLevel}";
-
-            var irPath = fullTestName + ".ll";
-
-            // Compile to LLVM IR.
-            RunClang([sourceFilePath, "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}"]);
-
-            var outputPath = $"{fullTestName}.exe";
-
-            using (var compiler = new Compiler())
-            using (var source = LLVMSourceCode.FromFile(irPath))
-            {
-                compiler.Compile(source, outputPath);
-            }
+            // Compile to executable binary.
+            var binaryPath = GetFullTestName(testName, optimizationLevel) + "_native.exe";
+            RunClang([GetSourceFilePath(testName), "-o", binaryPath, $"-{optimizationLevel}"]);
 
             RunProgram(
-                "dotnet",
-                [outputPath],
+                binaryPath,
+                [],
+                out var llvmExitCode,
+                out var llvmStandardOutput,
+                out var llvmStandardError);
+
+            Assert.AreEqual(llvmStandardError, managedStandardError);
+            Assert.AreEqual(llvmStandardOutput, managedStandardOutput);
+            Assert.AreEqual(llvmExitCode, managedExitCode);
+
+            Console.WriteLine($"ExitCode: {managedExitCode}");
+            Console.WriteLine($"Stdout: {managedStandardOutput}");
+        }
+
+        [TestMethod]
+        [DynamicData(nameof(TestDataCTestSuite), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
+        public void CTestSuite(string testName, string optimizationLevel)
+        {
+            CompileAndExecuteManaged(
+                testName, 
+                optimizationLevel,
                 out var managedExitCode,
                 out var managedStandardOutput,
                 out var managedStandardError);
 
             var nativeStandardOutput = File
-                .ReadAllText(Path.ChangeExtension(sourceFilePath, ".c.expected"))
+                .ReadAllText(GetSourceFilePath(testName) + ".expected")
                 .ReplaceLineEndings();
 
             Assert.AreEqual("", managedStandardError);
@@ -95,53 +117,6 @@ namespace CLILL.Tests
 
             Console.WriteLine($"Stdout: {managedStandardOutput}");
         }
-
-        //[TestMethod]
-        //[DynamicData(nameof(TestData), DynamicDataSourceType.Method)]
-        //public void CanCompileLlvmIrToMsil(string testName, string optimizationLevel)
-        //{
-        //    var sourceFilePath = Path.Combine(Environment.CurrentDirectory, testName);
-
-        //    var fullTestName = $"{testName}_{optimizationLevel}";
-
-        //    var irPath = fullTestName + ".ll";
-        //    var binaryPath = fullTestName + "_native.exe";
-
-        //    // Compile to LLVM IR.
-        //    RunClang([sourceFilePath, "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}"]);
-
-        //    // Compile to executable binary.
-        //    RunClang([sourceFilePath, "-o", binaryPath, $"-{optimizationLevel}"]);
-
-        //    var outputPath = $"{fullTestName}.exe";
-
-        //    using (var compiler = new Compiler())
-        //    using (var source = LLVMSourceCode.FromFile(irPath))
-        //    {
-        //        compiler.Compile(source, outputPath);
-        //    }
-
-        //    RunProgram(
-        //        "dotnet",
-        //        [outputPath],
-        //        out var managedExitCode,
-        //        out var managedStandardOutput,
-        //        out var managedStandardError);
-
-        //    RunProgram(
-        //        binaryPath,
-        //        [],
-        //        out var llvmExitCode,
-        //        out var llvmStandardOutput,
-        //        out var llvmStandardError);
-
-        //    Assert.AreEqual(llvmStandardError, managedStandardError);
-        //    Assert.AreEqual(llvmStandardOutput, managedStandardOutput);
-        //    Assert.AreEqual(llvmExitCode, managedExitCode);
-
-        //    Console.WriteLine($"ExitCode: {managedExitCode}");
-        //    Console.WriteLine($"Stdout: {managedStandardOutput}");
-        //}
 
         //[TestMethod]
         //[DataRow("O0")]
@@ -196,6 +171,35 @@ namespace CLILL.Tests
         //    Console.WriteLine($"Managed Stdout: {managedStandardOutput}");
         //    Console.WriteLine($"Native  Stdout: {llvmStandardOutput}");
         //}
+
+        private static string GetFullTestName(string testName, string optimizationLevel) => $"{testName}_{optimizationLevel}";
+
+        private static string GetSourceFilePath(string testName) => Path.Combine(Environment.CurrentDirectory, testName);
+
+        private static void CompileAndExecuteManaged(
+            string testName, 
+            string optimizationLevel,
+            out int managedExitCode,
+            out string managedStandardOutput,
+            out string managedStandardError)
+        {
+            var fullTestName = GetFullTestName(testName, optimizationLevel);
+
+            var irPath = fullTestName + ".ll";
+
+            // Compile to LLVM IR.
+            RunClang([GetSourceFilePath(testName), "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}"]);
+
+            var outputPath = $"{fullTestName}.exe";
+            Compiler.Compile(irPath, outputPath);
+
+            RunProgram(
+                "dotnet",
+                [outputPath],
+                out managedExitCode,
+                out managedStandardOutput,
+                out managedStandardError);
+        }
 
         private static void RunProgram(
             string executablePath, 
