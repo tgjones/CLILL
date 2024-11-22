@@ -101,39 +101,19 @@ namespace CLILL.Tests
             Console.WriteLine($"Stdout: {managedStandardOutput}");
         }
 
-        [TestMethod]
-        [DataRow("Fibonacci", "O0")]
-        [DataRow("Fibonacci", "O3")]
-        [DataRow("Mandelbrot", "O0")]
-        [DataRow("Mandelbrot", "O3")]
-        [DataRow("NBody", "O0")]
-        [DataRow("NBody", "O3")]
-        [DataRow("Sieve_of_Eratosthenes", "O0")]
-        [DataRow("Sieve_of_Eratosthenes", "O3")]
-        [DataRow("Pixar_Raytracer", "O0")]
-        [DataRow("Pixar_Raytracer", "O3")]
-        [DataRow("Fireflies_Flocking", "O0")]
-        [DataRow("Fireflies_Flocking", "O3")]
-        [DataRow("Polynomials", "O0")]
-        [DataRow("Polynomials", "O3")]
-        [DataRow("Particle_Kinematics", "O0")]
-        [DataRow("Particle_Kinematics", "O3")]
-        [DataRow("Arcfour", "O0")]
-        [DataRow("Arcfour", "O3")]
-        [DataRow("Seahash", "O0")]
-        [DataRow("Seahash", "O3")]
-        [DataRow("Radix", "O0")]
-        [DataRow("Radix", "O3")]
-        public void Benchmark(string benchmark, string optimizationLevel)
-        {
-            var testName = Path.Combine("TestPrograms", "benchmarks", "benchmarks.c");
+        private static IEnumerable<object[]> TestDataBenchmarks() => TestFiles(
+            Directory
+            .GetFiles(Path.Combine("TestPrograms", "benchmarks"), "*.c", SearchOption.AllDirectories));
 
-            string[] extraClangArgs = [$"-DBENCHMARK_{benchmark.ToUpperInvariant()}"];
-            var managedExePath = CompileManaged(testName, optimizationLevel, extraClangArgs);
+        [TestMethod]
+        [DynamicData(nameof(TestDataBenchmarks), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
+        public void Benchmark(string testName, string optimizationLevel)
+        {
+            var managedExePath = CompileManaged(testName, optimizationLevel);
 
             // Compile to executable binary.
             var binaryPath = GetFullTestName(testName, optimizationLevel) + "_native.exe";
-            RunClang([GetSourceFilePath(testName), "-o", binaryPath, $"-{optimizationLevel}", ..extraClangArgs]);
+            RunClang([GetSourceFilePath(testName), "-o", binaryPath, $"-{optimizationLevel}"]);
 
             var stopwatch = Stopwatch.StartNew();
 
@@ -185,17 +165,14 @@ namespace CLILL.Tests
                 out managedStandardError);
         }
 
-        private static string CompileManaged(
-            string testName,
-            string optimizationLevel,
-            string[] extraClangArgs = null)
+        private static string CompileManaged(string testName, string optimizationLevel)
         {
             var fullTestName = GetFullTestName(testName, optimizationLevel);
 
             var irPath = fullTestName + ".ll";
 
             // Compile to LLVM IR.
-            RunClang([GetSourceFilePath(testName), "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}", ..extraClangArgs]);
+            RunClang([GetSourceFilePath(testName), "-g", "-o", irPath, "-emit-llvm", "-S", $"-{optimizationLevel}"]);
 
             var outputPath = $"{fullTestName}.exe";
             Compiler.Compile(irPath, outputPath);
