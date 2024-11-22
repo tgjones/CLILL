@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.SymbolStore;
 using System.IO;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -107,24 +109,48 @@ namespace CLILL
             typeBuilder.CreateType();
 
             var metadataBuilder = assemblyBuilder.GenerateMetadata(
-                out BlobBuilder ilStream,
-                out BlobBuilder fieldData);
+                out var ilStream,
+                out var fieldData,
+                out var pdbBuilder);
 
-            var peHeaderBuilder = new PEHeaderBuilder(
-                imageCharacteristics: Characteristics.ExecutableImage);
+            var entryPointHandle = mainMethod != null
+                ? MetadataTokens.MethodDefinitionHandle(mainMethod.MetadataToken)
+                : default;
+
+            var portablePdbBuilder = new PortablePdbBuilder(
+                pdbBuilder,
+                metadataBuilder.GetRowCounts(),
+                entryPointHandle);
+
+            var portablePdbBlob = new BlobBuilder();
+            var pdbContentId = portablePdbBuilder.Serialize(portablePdbBlob);
+
+            var pdbOutputPath = Path.ChangeExtension(outputPath, ".pdb");
+            using (var pdbFileStream = new FileStream(pdbOutputPath, FileMode.Create, FileAccess.Write))
+            {
+                portablePdbBlob.WriteContentTo(pdbFileStream);
+            }
+
+            var debugDirectoryBuilder = new DebugDirectoryBuilder();
+            debugDirectoryBuilder.AddCodeViewEntry(Path.GetFileName(pdbOutputPath), pdbContentId, portablePdbBuilder.FormatVersion);
+
+            var peHeaderBuilder = new PEHeaderBuilder(imageCharacteristics: Characteristics.ExecutableImage);
 
             var peBuilder = new ManagedPEBuilder(
                 header: peHeaderBuilder,
                 metadataRootBuilder: new MetadataRootBuilder(metadataBuilder),
                 ilStream: ilStream,
                 mappedFieldData: fieldData,
-                entryPoint: mainMethod != null ? MetadataTokens.MethodDefinitionHandle(mainMethod.MetadataToken) : default);
+                debugDirectoryBuilder: debugDirectoryBuilder,
+                entryPoint: entryPointHandle);
 
             var peBlob = new BlobBuilder();
             peBuilder.Serialize(peBlob);
 
-            using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
-            peBlob.WriteContentTo(fileStream);
+            using (var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write))
+            {
+                peBlob.WriteContentTo(fileStream);
+            }
 
             // TODO: Make version dynamic.
             File.WriteAllText(
@@ -172,6 +198,9 @@ namespace CLILL
             // }
             // 
             // return main(args.Length, argv);
+
+            //ilGenerator.Emit(OpCodes.Call, typeof(Debugger).GetMethod(nameof(Debugger.Launch)));
+            //ilGenerator.Emit(OpCodes.Pop);
 
             foreach (var parameter in entryPoint.GetParameters())
             {

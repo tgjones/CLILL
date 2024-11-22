@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.Intrinsics;
+using System.Text.RegularExpressions;
 using CLILL.Runtime;
 using LLVMSharp.Interop;
 
@@ -15,6 +16,23 @@ namespace CLILL
             LLVMValueRef instruction,
             FunctionCompilationContext context)
         {
+            // Check for debug metadata.
+            var debugLoc = instruction.GetDebugLoc();
+            if (debugLoc != null)
+            {
+                var line = (int)debugLoc.GetDILocationLine() + 1;
+                var column = (int)debugLoc.GetDILocationColumn();
+                var scope = debugLoc.GetDILocationScope();
+
+                var debugFile = scope.GetDIScopeFile();
+
+                var document = context.CompilationContext.DefineDocument(debugFile);
+                context.ILGenerator.MarkSequencePoint(
+                    document,
+                    line, column,
+                    line, column + 1);
+            }
+
             CompileInstructionValue(instruction, context);
 
             if (instruction.TypeOf.Kind != LLVMTypeKind.LLVMVoidTypeKind
@@ -471,16 +489,18 @@ namespace CLILL
         private void EmitInsertElement(LLVMValueRef instruction, FunctionCompilationContext context)
         {
             // Vector
-            EmitValue(instruction.GetOperand(0), context);
+            var vectorOperand = instruction.GetOperand(0);
+            EmitValue(vectorOperand, context);
 
             // Index
             EmitValue(instruction.GetOperand(2), context);
             context.ILGenerator.Emit(OpCodes.Conv_I4);
 
             // Value
-            EmitValue(instruction.GetOperand(1), context);
+            var valueOperand = instruction.GetOperand(1);
+            EmitValue(valueOperand, context);
 
-            var withElementMethod = typeof(Vector128).GetMethod(nameof(Vector128.WithElement));
+            var withElementMethod = GetNonGenericVectorType(vectorOperand.TypeOf, context.CompilationContext).GetMethod(nameof(Vector128.WithElement)).MakeGenericMethod(GetMsilType(valueOperand.TypeOf, context.CompilationContext));
             context.ILGenerator.Emit(OpCodes.Call, withElementMethod);
         }
 
@@ -801,6 +821,15 @@ namespace CLILL
 
             switch (operands[^1].Name)
             {
+                case "llvm.dbg.declare":
+                    HandleDebugDeclare(instruction, context);
+                    return;
+
+                case "llvm.lifetime.start.p0":
+                case "llvm.lifetime.end.p0":
+                    // No-op.
+                    return;
+
                 case "llvm.va_start":
                     EmitValue(operands[0], context, forceLdloca: true);
                     context.ILGenerator.Emit(OpCodes.Arglist);
@@ -815,11 +844,6 @@ namespace CLILL
 
                     context.ILGenerator.Emit(OpCodes.Add);
                     context.ILGenerator.Emit(OpCodes.Stind_I);
-                    return;
-
-                case "llvm.lifetime.start.p0":
-                case "llvm.lifetime.end.p0":
-                    // No-op.
                     return;
             }
 
@@ -887,6 +911,48 @@ namespace CLILL
                 OpCodes.Call,
                 method,
                 varArgsParameterTypes);
+        }
+
+        [GeneratedRegex("arg: (\\d+),")]
+        private static partial Regex ArgRegex();
+
+        private unsafe void HandleDebugDeclare(LLVMValueRef instruction, FunctionCompilationContext context)
+        {
+            var value = instruction.GetOperand(0).MDNodeOperands[0];
+            var local = context.Locals[value];
+
+            var diLocalVariable = instruction.GetOperand(1);
+            var diLocalVariableName = diLocalVariable.MDNodeOperands[1].GetMDString(out _);
+
+            var diLocalVariableString = diLocalVariable.ToString();
+            var diLocalVariableArgMatch = ArgRegex().Match(diLocalVariableString);
+            if (diLocalVariableArgMatch.Success && int.TryParse(diLocalVariableArgMatch.Groups[1].Value, out var diLocalVariableArg) && diLocalVariableArg > 0)
+            {
+                // Parameter information.
+
+                // TODO
+
+                //var parameter = context.Parameters.Values.Single(x => x.Position == diLocalVariableArg);
+                //parameter.Name = diLocalVariableName;
+            }
+            else
+            {
+                // Local information.
+                local.SetLocalSymInfo(diLocalVariableName);
+            }
+
+            var expression = instruction.GetOperand(2).AsMetadata();
+
+            var dbgMetadata = instruction.GetMetadata("dbg");
+
+            var line = dbgMetadata.GetDILocationLine();
+            var scope = dbgMetadata.GetDILocationScope();
+
+            var file = scope.GetDIScopeFile();
+
+            var symbolDocumentWriter = context.CompilationContext.DefineDocument(file);
+
+            //local.SetLocalSymInfo();
         }
 
         private static unsafe int GetElementPtrConst(LLVMValueRef constExpr, CompilationContext context)

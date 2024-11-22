@@ -151,4 +151,116 @@ internal static class LLVMExtensions
             _ => false,
         };
     }
+
+    public static unsafe LLVMMetadataRef AsMetadata(this LLVMValueRef value)
+    {
+        if (value.Kind != LLVMValueKind.LLVMMetadataAsValueValueKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        return LLVM.ValueAsMetadata(value);
+    }
+
+    public static unsafe LLVMMetadataRef GetMetadata(this LLVMValueRef value, string name)
+    {
+        using var marshaledName = new MarshaledString(name);
+        var kindID = LLVM.GetMDKindID(marshaledName.Value, (uint)marshaledName.Length);
+        return value.GetMetadata(kindID).AsMetadata();
+    }
+
+    public static unsafe LLVMMetadataKind GetMetadataKind(this LLVMMetadataRef metadata) 
+        => (LLVMMetadataKind)LLVM.GetMetadataKind(metadata);
+
+    public static unsafe LLVMMetadataRef GetDebugLoc(this LLVMValueRef instruction)
+    {
+        if (instruction.Kind != LLVMValueKind.LLVMInstructionValueKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        return (LLVMMetadataRef)LLVM.InstructionGetDebugLoc(instruction);
+    }
+
+    public static unsafe uint GetDILocationLine(this LLVMMetadataRef metadata)
+    {
+        if (metadata.GetMetadataKind() != LLVMMetadataKind.LLVMDILocationMetadataKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        return LLVM.DILocationGetLine(metadata);
+    }
+
+    public static unsafe uint GetDILocationColumn(this LLVMMetadataRef metadata)
+    {
+        if (metadata.GetMetadataKind() != LLVMMetadataKind.LLVMDILocationMetadataKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        return LLVM.DILocationGetColumn(metadata);
+    }
+
+    public static unsafe LLVMMetadataRef GetDILocationScope(this LLVMMetadataRef metadata)
+    {
+        if (metadata.GetMetadataKind() != LLVMMetadataKind.LLVMDILocationMetadataKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        return LLVM.DILocationGetScope(metadata);
+    }
+
+    public static unsafe LLVMMetadataRef GetDIScopeFile(this LLVMMetadataRef metadata)
+    {
+        var metadataKind = metadata.GetMetadataKind();
+        switch (metadataKind)
+        {
+            case LLVMMetadataKind.LLVMDISubprogramMetadataKind:
+            case LLVMMetadataKind.LLVMDILexicalBlockMetadataKind:
+                break;
+
+            default:
+                throw new InvalidOperationException();
+        }
+
+        return LLVM.DIScopeGetFile(metadata);
+    }
+
+    public static unsafe string GetDIFileDirectory(this LLVMMetadataRef metadata)
+    {
+        if (metadata.GetMetadataKind() != LLVMMetadataKind.LLVMDIFileMetadataKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        uint len;
+        var directoryBytes = LLVM.DIFileGetDirectory(metadata, &len);
+
+        return SpanExtensions.AsString(directoryBytes);
+    }
+
+    public static unsafe string GetDIFileFilename(this LLVMMetadataRef metadata)
+    {
+        if (metadata.GetMetadataKind() != LLVMMetadataKind.LLVMDIFileMetadataKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        uint len;
+        var filenameBytes = LLVM.DIFileGetFilename(metadata, &len);
+
+        return SpanExtensions.AsString(filenameBytes);
+    }
+
+    public static unsafe string GetDILocalVariableName(this LLVMMetadataRef metadata)
+    {
+        if (metadata.GetMetadataKind() != LLVMMetadataKind.LLVMDILocalVariableMetadataKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        throw new NotImplementedException();
+    }
 }

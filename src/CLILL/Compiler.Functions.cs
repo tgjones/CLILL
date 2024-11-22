@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using CLILL.Runtime;
@@ -119,12 +120,19 @@ namespace CLILL
                 parameterTypes[i] = GetMsilType(parameters[i].TypeOf, context);
             }
 
-            return context.TypeBuilder.DefineMethod(
+            var result = context.TypeBuilder.DefineMethod(
                 function.Name,
                 MethodAttributes.Static | MethodAttributes.Public, // TODO
                 functionType.IsFunctionVarArg ? CallingConventions.VarArgs : CallingConventions.Standard,
                 GetMsilType(functionType.ReturnType, context),
                 parameterTypes);
+
+            var skipLocalsInitAttribute = new CustomAttributeBuilder(
+                typeof(SkipLocalsInitAttribute).GetConstructor([]),
+                []);
+            result.SetCustomAttribute(skipLocalsInitAttribute);
+
+            return result;
         }
 
         private unsafe MethodBuilder CompileMethodBody(
