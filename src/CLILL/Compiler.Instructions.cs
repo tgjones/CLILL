@@ -825,6 +825,14 @@ namespace CLILL
                     HandleDebugDeclare(instruction, context);
                     return;
 
+                case "llvm.dbg.label":
+                    // No-op.
+                    return;
+
+                case "llvm.dbg.value":
+                    // TODO
+                    return;
+
                 case "llvm.lifetime.start.p0":
                 case "llvm.lifetime.end.p0":
                     // No-op.
@@ -919,7 +927,6 @@ namespace CLILL
         private unsafe void HandleDebugDeclare(LLVMValueRef instruction, FunctionCompilationContext context)
         {
             var value = instruction.GetOperand(0).MDNodeOperands[0];
-            var local = context.Locals[value];
 
             var diLocalVariable = instruction.GetOperand(1);
             var diLocalVariableName = diLocalVariable.MDNodeOperands[1].GetMDString(out _);
@@ -937,8 +944,16 @@ namespace CLILL
             }
             else
             {
-                // Local information.
-                local.SetLocalSymInfo(diLocalVariableName);
+                if (context.Locals.TryGetValue(value, out var local))
+                {
+                    // Local information.
+                    local.SetLocalSymInfo(diLocalVariableName);
+                }
+                //else
+                //{
+                //    // Global information
+                //    var global = context.CompilationContext.Globals[value];
+                //}
             }
 
             var expression = instruction.GetOperand(2).AsMetadata();
@@ -951,8 +966,6 @@ namespace CLILL
             var file = scope.GetDIScopeFile();
 
             var symbolDocumentWriter = context.CompilationContext.DefineDocument(file);
-
-            //local.SetLocalSymInfo();
         }
 
         private static unsafe int GetElementPtrConst(LLVMValueRef constExpr, CompilationContext context)
