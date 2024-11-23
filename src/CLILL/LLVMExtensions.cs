@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using LLVMSharp.Interop;
@@ -169,7 +169,7 @@ internal static class LLVMExtensions
         return value.GetMetadata(kindID).AsMetadata();
     }
 
-    public static unsafe LLVMMetadataKind GetMetadataKind(this LLVMMetadataRef metadata) 
+    public static unsafe LLVMMetadataKind GetMetadataKind(this LLVMMetadataRef metadata)
         => (LLVMMetadataKind)LLVM.GetMetadataKind(metadata);
 
     public static unsafe LLVMMetadataRef GetDebugLoc(this LLVMValueRef instruction)

@@ -1,10 +1,9 @@
-﻿namespace CLILL
+namespace CLILL;
+
+public static class Program
 {
-    public static class Program
+    public static void Main(string[] args)
     {
-        public static void Main(string[] args)
-        {
-            Compiler.Compile(args[0], args[1]);
-        }
+        Compiler.Compile(args[0], args[1]);
     }
 }

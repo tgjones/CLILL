@@ -1,4 +1,4 @@
-﻿using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics;
 
 namespace CLILL.Runtime;
 
