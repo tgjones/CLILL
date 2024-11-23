@@ -237,7 +237,7 @@ namespace CLILL.Tests
         private static void RunClang(string[] arguments)
         {
             RunProgram(
-                @"..\..\..\..\..\lib\llvm\win-x64\clang.exe",
+                @"..\..\..\..\..\lib\clang\win-x64\clang.exe",
                 arguments,
                 out var exitCode,
                 out _,
