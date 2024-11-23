@@ -30,8 +30,8 @@ public class CompilerTests
     }
 
     private static IEnumerable<object[]> TestDataArbitrary() => TestFiles(
-        Directory
-        .GetFiles(Path.Combine("TestPrograms", "arbitrary"), "*.*", SearchOption.AllDirectories));
+        Directory.GetFiles(Path.Combine("TestPrograms", "arbitrary"), "*.c", SearchOption.AllDirectories)
+        .Concat(Directory.GetFiles(Path.Combine("TestPrograms", "arbitrary"), "*.cpp", SearchOption.AllDirectories)));
 
     [TestMethod]
     [DynamicData(nameof(TestDataArbitrary), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
