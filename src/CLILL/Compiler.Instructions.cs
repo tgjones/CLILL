@@ -11,25 +11,33 @@ namespace CLILL;
 
 partial class Compiler
 {
+    private int _previousSequencePointOffset = -1;
+
     private void CompileInstruction(
         LLVMValueRef instruction,
         FunctionCompilationContext context)
     {
         // Check for debug metadata.
-        var debugLoc = instruction.GetDebugLoc();
-        if (debugLoc != null)
+        if (instruction.IsADbgInfoIntrinsic == null)
         {
-            var line = (int)debugLoc.GetDILocationLine() + 1;
-            var column = (int)debugLoc.GetDILocationColumn();
-            var scope = debugLoc.GetDILocationScope();
+            var debugLoc = instruction.GetDebugLoc();
+            if (debugLoc != null && context.ILGenerator.ILOffset != _previousSequencePointOffset)
+            {
+                var line = (int)debugLoc.GetDILocationLine();
+                var column = (int)debugLoc.GetDILocationColumn();
+                var scope = debugLoc.GetDILocationScope();
 
-            var debugFile = scope.GetDIScopeFile();
+                var debugFile = scope.GetDIScopeFile();
 
-            var document = context.CompilationContext.DefineDocument(debugFile);
-            context.ILGenerator.MarkSequencePoint(
-                document,
-                line, column,
-                line, column + 1);
+                var document = context.CompilationContext.DefineDocument(debugFile);
+
+                context.ILGenerator.MarkSequencePoint(
+                   document,
+                   line, column,
+                   line, column + 1);
+
+                _previousSequencePointOffset = context.ILGenerator.ILOffset;
+            }
         }
 
         CompileInstructionValue(instruction, context);
@@ -119,7 +127,7 @@ partial class Compiler
                 break;
 
             case LLVMOpcode.LLVMFNeg:
-                EmitNegate(instruction, context);
+                EmitUnaryOperation(instruction, OpCodes.Neg, nameof(Vector128.Negate), context);
                 break;
 
             case LLVMOpcode.LLVMFPExt:
@@ -236,12 +244,6 @@ partial class Compiler
             default:
                 throw new NotImplementedException($"Instruction {instruction.InstructionOpcode} is not implemented: {instruction}");
         }
-    }
-
-    private void EmitNegate(LLVMValueRef instruction, FunctionCompilationContext context)
-    {
-        EmitValue(instruction.GetOperand(0), context);
-        context.ILGenerator.Emit(OpCodes.Neg);
     }
 
     private void EmitExtractElement(LLVMValueRef instruction, FunctionCompilationContext context)
@@ -698,22 +700,22 @@ partial class Compiler
         }
     }
 
-    private void EmitBinaryOperation(
-        LLVMValueRef instruction,
-        OpCode scalarOpCode,
-        FunctionCompilationContext context)
-    {
-        EmitBinaryOperation(instruction, scalarOpCode, null, context);
-    }
-
-    private void EmitBinaryOperation(
+    private void EmitUnaryOrBinaryOperation(
         LLVMValueRef instruction,
         OpCode scalarOpCode,
         string vectorMethodName,
-        FunctionCompilationContext context)
+        FunctionCompilationContext context,
+        int operandCount)
     {
-        EmitValue(instruction.GetOperand(0), context);
-        EmitValue(instruction.GetOperand(1), context);
+        if (instruction.OperandCount != operandCount)
+        {
+            throw new InvalidOperationException();
+        }
+
+        for (var i = 0u; i < operandCount; i++)
+        {
+            EmitValue(instruction.GetOperand(i), context);
+        }
 
         switch (instruction.TypeOf.Kind)
         {
@@ -730,7 +732,7 @@ partial class Compiler
                 }
                 var nonGenericVectorType = GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext);
                 var genericVectorType = GetGenericVectorType(instruction.TypeOf, context.CompilationContext).MakeGenericType(Type.MakeGenericMethodParameter(0));
-                var genericVectorMethod = nonGenericVectorType.GetMethod(vectorMethodName, [genericVectorType, genericVectorType]);
+                var genericVectorMethod = nonGenericVectorType.GetMethod(vectorMethodName, Enumerable.Repeat(genericVectorType, operandCount).ToArray());
                 var elementType = GetMsilType(instruction.TypeOf.ElementType, context.CompilationContext);
                 var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
                 context.ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
@@ -739,6 +741,32 @@ partial class Compiler
             default:
                 throw new NotImplementedException();
         }
+    }
+
+    private void EmitUnaryOperation(
+        LLVMValueRef instruction,
+        OpCode scalarOpCode,
+        string vectorMethodName,
+        FunctionCompilationContext context)
+    {
+        EmitUnaryOrBinaryOperation(instruction, scalarOpCode, vectorMethodName, context, 1);
+    }
+
+    private void EmitBinaryOperation(
+        LLVMValueRef instruction,
+        OpCode scalarOpCode,
+        FunctionCompilationContext context)
+    {
+        EmitBinaryOperation(instruction, scalarOpCode, null, context);
+    }
+
+    private void EmitBinaryOperation(
+        LLVMValueRef instruction,
+        OpCode scalarOpCode,
+        string vectorMethodName,
+        FunctionCompilationContext context)
+    {
+        EmitUnaryOrBinaryOperation(instruction, scalarOpCode, vectorMethodName, context, 2);
     }
 
     private void EmitBr(LLVMValueRef instruction, FunctionCompilationContext context)
@@ -1343,11 +1371,19 @@ partial class Compiler
                 switch (valueTypeRef.Kind)
                 {
                     case LLVMTypeKind.LLVMDoubleTypeKind:
-                        ilGenerator.Emit(OpCodes.Ldc_R8, valueRef.GetConstRealDouble(out _));
+                        ilGenerator.Emit(OpCodes.Ldc_R8, valueRef.GetConstRealDouble(out var losesInfo));
+                        if (losesInfo)
+                        {
+                            throw new InvalidOperationException();
+                        }
                         break;
 
                     case LLVMTypeKind.LLVMFloatTypeKind:
-                        ilGenerator.Emit(OpCodes.Ldc_R4, (float)valueRef.GetConstRealDouble(out _));
+                        ilGenerator.Emit(OpCodes.Ldc_R4, (float)valueRef.GetConstRealDouble(out var losesInfo2));
+                        if (losesInfo2)
+                        {
+                            throw new InvalidOperationException();
+                        }
                         break;
 
                     default:

@@ -57,8 +57,9 @@ public sealed partial class Compiler : IDisposable
             assemblyName.Name);
 
         var typeBuilder = dynamicModule.DefineType(
-            "MyType",
-            TypeAttributes.Public);
+            "Program",
+            TypeAttributes.Public,
+            typeof(ValueType));
 
         var compilationContext = new CompilationContext(
             _module,
@@ -103,7 +104,7 @@ public sealed partial class Compiler : IDisposable
         }
 
         var mainMethod = entryPoint != null
-            ? CreateMainMethod(typeBuilder, entryPoint)
+            ? CreateMainMethod(dynamicModule, entryPoint)
             : null;
 
         typeBuilder.CreateType();
@@ -177,14 +178,16 @@ public sealed partial class Compiler : IDisposable
             true);
     }
 
-    private static MethodBuilder CreateMainMethod(TypeBuilder typeBuilder, MethodInfo entryPoint)
+    private static MethodBuilder CreateMainMethod(ModuleBuilder moduleBuilder, MethodInfo entryPoint)
     {
-        var method = typeBuilder.DefineMethod(
+        var method = moduleBuilder.DefineGlobalMethod(
             "Main",
             MethodAttributes.Static | MethodAttributes.Public,
             CallingConventions.Standard,
             typeof(int),
             [typeof(string[])]);
+
+        method.DefineParameter(1, ParameterAttributes.None, "args");
 
         var ilGenerator = method.GetILGenerator();
 
