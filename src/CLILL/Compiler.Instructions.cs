@@ -4,7 +4,6 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.Intrinsics;
-using System.Text.RegularExpressions;
 using CLILL.Runtime;
 using LLVMSharp.Interop;
 
@@ -921,26 +920,17 @@ partial class Compiler
             varArgsParameterTypes);
     }
 
-    [GeneratedRegex("arg: (\\d+),")]
-    private static partial Regex ArgRegex();
-
     private unsafe void HandleDebugDeclare(LLVMValueRef instruction, FunctionCompilationContext context)
     {
         var value = instruction.GetOperand(0).MDNodeOperands[0];
 
         var diLocalVariable = instruction.GetOperand(1);
-        var diLocalVariableName = diLocalVariable.MDNodeOperands[1].GetMDString(out _);
+        var diLocalVariableName = diLocalVariable.GetDILocalVariableName();
 
-        var diLocalVariableString = diLocalVariable.ToString();
-        var diLocalVariableArgMatch = ArgRegex().Match(diLocalVariableString);
-        if (diLocalVariableArgMatch.Success && int.TryParse(diLocalVariableArgMatch.Groups[1].Value, out var diLocalVariableArg) && diLocalVariableArg > 0)
+        var diLocalVariableArg = diLocalVariable.GetDILocalVariableArg();
+        if (diLocalVariableArg != null)
         {
-            // Parameter information.
-
-            // TODO
-
-            //var parameter = context.Parameters.Values.Single(x => x.Position == diLocalVariableArg);
-            //parameter.Name = diLocalVariableName;
+            // Parameter information. We'll have already used this to set the parameter name.
         }
         else
         {

@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Runtime.Intrinsics;
 using CLILL.Runtime;
 using LLVMSharp.Interop;
 
@@ -159,11 +158,12 @@ partial class Compiler
         for (var i = 0; i < function.Params.Length; i++)
         {
             var parameter = function.Params[i];
+            var parameterIndex = i + 1;
 
-            var parameterName = parameter.Name;
+            var parameterName = GetParameterName(function, parameterIndex);
 
             var parameterBuilder = methodBuilder.DefineParameter(
-                i + 1,
+                parameterIndex,
                 ParameterAttributes.None, // TODO
                 parameterName);
 
@@ -203,6 +203,35 @@ partial class Compiler
         return methodBuilder;
     }
 
+    private static string GetParameterName(LLVMValueRef function, int parameterIndex)
+    {
+        foreach (var basicBlock in function.BasicBlocks)
+        {
+            foreach (var instruction in basicBlock.GetInstructions())
+            {
+                if (instruction.InstructionOpcode == LLVMOpcode.LLVMCall)
+                {
+                    var operands = instruction.GetOperands().ToList();
+
+                    switch (operands[^1].Name)
+                    {
+                        case "llvm.dbg.declare":
+                        case "llvm.dbg.value":
+                            var diLocalVariable = instruction.GetOperand(1);
+                            var diLocalVariableArg = diLocalVariable.GetDILocalVariableArg();
+                            if (diLocalVariableArg == parameterIndex)
+                            {
+                                return diLocalVariable.GetDILocalVariableName();
+                            }
+                            break;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static bool CanPushToStack(List<LLVMValueRef> instructions, int index)
     {
         var instruction = instructions[index];
@@ -221,6 +250,19 @@ partial class Compiler
         if (user.InstructionParent != instruction.InstructionParent)
         {
             return false;
+        }
+
+        // We can never inline an alloca instruction.
+        if (instruction.InstructionOpcode == LLVMOpcode.LLVMAlloca)
+        {
+            return false;
+        }
+
+        // If user is next instruction, then we can always inline it,
+        // regardless of the current or next instruction types.
+        if (user == instruction.NextInstruction)
+        {
+            return true;
         }
 
         if (instruction.InstructionOpcode == LLVMOpcode.LLVMLoad)

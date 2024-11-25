@@ -1,11 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using LLVMSharp.Interop;
 
 namespace CLILL;
 
-internal static class LLVMExtensions
+internal static partial class LLVMExtensions
 {
     public static IEnumerable<LLVMValueRef> GetGlobals(this LLVMModuleRef module)
     {
@@ -254,13 +255,47 @@ internal static class LLVMExtensions
         return SpanExtensions.AsString(filenameBytes);
     }
 
-    public static unsafe string GetDILocalVariableName(this LLVMMetadataRef metadata)
+    public static unsafe string GetDILocalVariableName(this LLVMValueRef value)
     {
-        if (metadata.GetMetadataKind() != LLVMMetadataKind.LLVMDILocalVariableMetadataKind)
+        if (value.Kind != LLVMValueKind.LLVMMetadataAsValueValueKind)
         {
             throw new InvalidOperationException();
         }
 
-        throw new NotImplementedException();
+        if (value.AsMetadata().GetMetadataKind() != LLVMMetadataKind.LLVMDILocalVariableMetadataKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        return value.MDNodeOperands[1].GetMDString(out _);
+    }
+
+    [GeneratedRegex("arg: (\\d+),")]
+    private static partial Regex ArgRegex();
+
+    public static unsafe int? GetDILocalVariableArg(this LLVMValueRef value)
+    {
+        if (value.Kind != LLVMValueKind.LLVMMetadataAsValueValueKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        if (value.AsMetadata().GetMetadataKind() != LLVMMetadataKind.LLVMDILocalVariableMetadataKind)
+        {
+            throw new InvalidOperationException();
+        }
+
+        // There's no LLVM-C API for this, so we do it the hard way.
+
+        var diLocalVariableString = value.ToString();
+        var diLocalVariableArgMatch = ArgRegex().Match(diLocalVariableString);
+        if (diLocalVariableArgMatch.Success && int.TryParse(diLocalVariableArgMatch.Groups[1].Value, out var diLocalVariableArg) && diLocalVariableArg > 0)
+        {
+            return diLocalVariableArg;
+        }
+        else
+        {
+            return null;
+        }
     }
 }
