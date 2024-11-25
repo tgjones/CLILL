@@ -1481,15 +1481,15 @@ partial class Compiler
                 {
                     case 1:
                     case 8:
-                        context.ILGenerator.Emit(OpCodes.Ldind_I1);
+                        context.ILGenerator.Emit(OpCodes.Ldind_U1);
                         break;
 
                     case 16:
-                        context.ILGenerator.Emit(OpCodes.Ldind_I2);
+                        context.ILGenerator.Emit(OpCodes.Ldind_U2);
                         break;
 
                     case 32:
-                        context.ILGenerator.Emit(OpCodes.Ldind_I4);
+                        context.ILGenerator.Emit(OpCodes.Ldind_U4);
                         break;
 
                     case 64:
