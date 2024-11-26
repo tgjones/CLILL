@@ -416,8 +416,11 @@ partial class Compiler
             var sourceVectorLocal = maskIndex < sourceVector0.TypeOf.VectorSize
                 ? sourceVector0Local
                 : sourceVector1Local;
+            var sourceVectorIndex = maskIndex < sourceVector0.TypeOf.VectorSize
+                ? maskIndex
+                : maskIndex - sourceVector0.TypeOf.VectorSize;
             context.ILGenerator.Emit(OpCodes.Ldloca, sourceVectorLocal);
-            context.ILGenerator.Emit(OpCodes.Ldc_I4, maskIndex * elementSizeInBytes);
+            context.ILGenerator.Emit(OpCodes.Ldc_I4, sourceVectorIndex * elementSizeInBytes);
             context.ILGenerator.Emit(OpCodes.Conv_U);
             context.ILGenerator.Emit(OpCodes.Add);
             EmitLoadIndirect(instruction.TypeOf.ElementType, context);
