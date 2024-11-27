@@ -20,6 +20,9 @@ public static unsafe class LLVMIntrinsics
     public static double FMulAddF64(double a, double b, double c) => Math.FusedMultiplyAdd(a, b, c);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector64<float> FMulAddV2F32(Vector64<float> a, Vector64<float> b, Vector64<float> c) => Vector64.FusedMultiplyAdd(a, b, c);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<double> FMulAddV2F64(Vector128<double> a, Vector128<double> b, Vector128<double> c) => Vector128.FusedMultiplyAdd(a, b, c);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
