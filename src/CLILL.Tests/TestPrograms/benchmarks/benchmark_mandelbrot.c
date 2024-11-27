@@ -13,10 +13,10 @@ float benchmark_mandelbrot(uint32_t width, uint32_t height, uint32_t iterations)
 			deltaY = (bottom - top) / height,
 			coordinateX = left;
 
-		for (int x = 0; x < width; x++) {
+		for (uint32_t x = 0; x < width; x++) {
 			float coordinateY = top;
 
-			for (int y = 0; y < height; y++) {
+			for (uint32_t y = 0; y < height; y++) {
 				float workX = 0;
 				float workY = 0;
 				int counter = 0;

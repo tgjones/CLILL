@@ -145,7 +145,7 @@ double benchmark_nbody(uint32_t advancements) {
 	benchmark_nbody_initialize_bodies(sun, end);
 	benchmark_nbody_energy(sun, end);
 
-	while (advancements-- > 0) {
+	while (--advancements > 0) {
 		benchmark_nbody_advance(sun, end, 0.01);
 	}
 

@@ -1,6 +1,6 @@
 #include "benchmark.h"
 
-inline static void benchmark_arcfour_key_setup(uint8_t* state, uint8_t* key, int length) {
+inline static int benchmark_arcfour_key_setup(uint8_t* state, uint8_t* key, int length) {
 	int i, j;
 	uint8_t t;
 
@@ -14,9 +14,11 @@ inline static void benchmark_arcfour_key_setup(uint8_t* state, uint8_t* key, int
 		state[i] = state[j];
 		state[j] = t;
 	}
+
+	return i;
 }
 
-inline static void benchmark_arcfour_generate_stream(uint8_t* state, uint8_t* buffer, int length) {
+inline static int benchmark_arcfour_generate_stream(uint8_t* state, uint8_t* buffer, int length) {
 	int i, j;
 	int idx;
 	uint8_t t;
@@ -29,9 +31,11 @@ inline static void benchmark_arcfour_generate_stream(uint8_t* state, uint8_t* bu
 		state[j] = t;
 		buffer[idx] = state[(state[i] + state[j]) % 256];
 	}
+
+	return i;
 }
 
-uint32_t benchmark_arcfour(uint32_t iterations) {
+int benchmark_arcfour(uint32_t iterations) {
 	const int keyLength = 5;
 	const int streamLength = 10;
 
@@ -57,11 +61,11 @@ uint32_t benchmark_arcfour(uint32_t iterations) {
 	stream[8] = 0xA7;
 	stream[9] = 0x19;
 
-	uint32_t idx;
+	int idx = 0;
 
-	for (idx = 0; idx < iterations; idx++) {
-		benchmark_arcfour_key_setup(state, key, keyLength);
-		benchmark_arcfour_generate_stream(state, buffer, streamLength);
+	for (uint32_t i = 0; i < iterations; i++) {
+		idx = benchmark_arcfour_key_setup(state, key, keyLength);
+		idx = benchmark_arcfour_generate_stream(state, buffer, streamLength);
 	}
 
 	FREE(state);

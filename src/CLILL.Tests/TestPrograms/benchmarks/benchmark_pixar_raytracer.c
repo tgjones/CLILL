@@ -54,11 +54,13 @@ inline static Vector benchmark_pixar_raytracer_add_float(Vector vector, float va
 }
 
 inline static Vector benchmark_pixar_raytracer_cross(Vector to, Vector from) {
-	to.y *= from.z - to.z * from.y;
-	to.z *= from.x - to.x * from.z;
-	to.x *= from.y - to.y * from.x;
+	Vector vector = { 0 };
 
-	return to;
+	vector.x = to.y * from.z - to.z * from.y;
+	vector.y = to.z * from.x - to.x * from.z;
+	vector.z = to.x * from.y - to.y * from.x;
+
+	return vector;
 }
 
 inline static float benchmark_pixar_raytracer_min(float left, float right) {
@@ -117,7 +119,7 @@ static float benchmark_pixar_raytracer_sample(Vector position, int* hitType) {
 	curves[0] = STRUCT_INIT(Vector) { -11.0f, 6.0f, 0.0f };
 	curves[1] = STRUCT_INIT(Vector) { 11.0f, 6.0f, 0.0f };
 
-	for (int i = 2; i > 0; i--) {
+	for (int i = 1; i >= 0; i--) {
 		Vector o = benchmark_pixar_raytracer_add(f, benchmark_pixar_raytracer_multiply_float(curves[i], -1.0f));
 		float m = 0.0f;
 

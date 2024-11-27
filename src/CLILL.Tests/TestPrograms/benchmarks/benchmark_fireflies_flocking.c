@@ -61,15 +61,15 @@ float benchmark_fireflies_flocking(uint32_t boids, uint32_t lifetime) {
 
 	Boid* fireflies = (Boid*)MALLOC(boids * sizeof(Boid), 16);
 
-	for (int i = 0; i < boids; ++i) {
+	for (uint32_t i = 0; i < boids; ++i) {
 		fireflies[i].position = STRUCT_INIT(Vector) { benchmark_fireflies_flocking_random(), benchmark_fireflies_flocking_random(), benchmark_fireflies_flocking_random() };
 		fireflies[i].velocity = STRUCT_INIT(Vector) { benchmark_fireflies_flocking_random(), benchmark_fireflies_flocking_random(), benchmark_fireflies_flocking_random() };
 		fireflies[i].acceleration = STRUCT_INIT(Vector) { 0.0f, 0.0f, 0.0f };
 	}
 
-	for (int i = 0; i < lifetime; ++i) {
+	for (uint32_t i = 0; i < lifetime; ++i) {
 		// Update
-		for (int boid = 0; boid < boids; ++boid) {
+		for (uint32_t boid = 0; boid < boids; ++boid) {
 			benchmark_fireflies_flocking_add(&fireflies[boid].velocity, &fireflies[boid].acceleration);
 
 			float speed = benchmark_fireflies_flocking_length(&fireflies[boid].velocity);
@@ -84,11 +84,11 @@ float benchmark_fireflies_flocking(uint32_t boids, uint32_t lifetime) {
 		}
 
 		// Separation
-		for (int boid = 0; boid < boids; ++boid) {
+		for (uint32_t boid = 0; boid < boids; ++boid) {
 			Vector separation = { 0 };
 			int count = 0;
 
-			for (int target = 0; target < boids; ++target) {
+			for (uint32_t target = 0; target < boids; ++target) {
 				Vector position = fireflies[boid].position;
 
 				benchmark_fireflies_flocking_subtract(&position, &fireflies[target].position);
@@ -123,11 +123,11 @@ float benchmark_fireflies_flocking(uint32_t boids, uint32_t lifetime) {
 		}
 
 		// Cohesion
-		for (int boid = 0; boid < boids; ++boid) {
+		for (uint32_t boid = 0; boid < boids; ++boid) {
 			Vector cohesion = { 0 };
 			int count = 0;
 
-			for (int target = 0; target < boids; ++target) {
+			for (uint32_t target = 0; target < boids; ++target) {
 				Vector position = fireflies[boid].position;
 
 				benchmark_fireflies_flocking_subtract(&position, &fireflies[target].position);
@@ -161,7 +161,7 @@ float benchmark_fireflies_flocking(uint32_t boids, uint32_t lifetime) {
 
 	FREE(fireflies);
 
-	return parkMiller;
+	return (float)parkMiller;
 }
 
 int main()
