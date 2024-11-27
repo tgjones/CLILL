@@ -240,12 +240,12 @@ public class CompilerTests
             @"..\..\..\..\..\lib\clang\win-x64\clang.exe",
             arguments,
             out var exitCode,
-            out _,
+            out var standardOutput,
             out var standardError);
 
         if (exitCode != 0)
         {
-            throw new InvalidOperationException(standardError);
+            throw new InvalidOperationException(standardOutput + Environment.NewLine + standardError);
         }
     }
 }
