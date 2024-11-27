@@ -298,8 +298,7 @@ partial class Compiler
 
         if (ptr.IsAAllocaInst != null && context.Locals.TryGetValue(ptr, out var local) && (local.LocalType.IsPrimitive || local.LocalType.IsPointer))
         {
-            // But only if value came from alloca?
-            EmitValue(value, context, forceLdloca: value.IsAAllocaInst != null /*&& value.TypeOf.Kind == LLVMTypeKind.LLVMPointerTypeKind*/);
+            EmitValue(value, context, isStore: true);
             context.ILGenerator.Emit(OpCodes.Stloc, local);
         }
         else
@@ -869,7 +868,7 @@ partial class Compiler
                 return;
 
             case "llvm.va_start":
-                EmitValue(operands[0], context, forceLdloca: true);
+                EmitValue(operands[0], context);
                 context.ILGenerator.Emit(OpCodes.Arglist);
                 context.ILGenerator.Emit(OpCodes.Conv_U);
 
@@ -1282,7 +1281,7 @@ partial class Compiler
     private void EmitValue(
         LLVMValueRef valueRef,
         FunctionCompilationContext context,
-        bool forceLdloca = false)
+        bool isStore = false)
     {
         if (valueRef.IsConstant)
         {
@@ -1290,7 +1289,7 @@ partial class Compiler
         }
         else if (context.Locals.TryGetValue(valueRef, out var local))
         {
-            if (valueRef.IsAAllocaInst != null)
+            if (valueRef.IsAAllocaInst != null && !isStore)
             {
                 context.ILGenerator.Emit(OpCodes.Ldloca, local);
             }
