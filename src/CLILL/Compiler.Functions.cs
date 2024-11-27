@@ -32,6 +32,9 @@ partial class Compiler
                     case "llvm.fmuladd.f64":
                         return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.FMulAddF64));
 
+                    case "llvm.fmuladd.v2f32":
+                        return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.FMulAddV2F32));
+
                     case "llvm.fmuladd.v2f64":
                         return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.FMulAddV2F64));
 
