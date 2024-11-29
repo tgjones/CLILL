@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  
+jobs:
+  build:
+    runs-on: windows-latest
+  
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+  
+    - name: Install .NET
+      uses: actions/setup-dotnet@v4
+  
+    - name: Build & Test Debug
+      run: dotnet test src --configuration Debug
+
+    - name: Build & Test Release
+      run: dotnet test src --configuration Release
