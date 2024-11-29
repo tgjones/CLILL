@@ -63,9 +63,11 @@ partial class Compiler
                         return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.SqrtF64));
 
                     case "llvm.stackrestore":
+                    case "llvm.stackrestore.p0":
                         return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.StackRestore));
 
                     case "llvm.stacksave":
+                    case "llvm.stacksave.p0":
                         return typeof(LLVMIntrinsics).GetMethod(nameof(LLVMIntrinsics.StackSave));
 
                     case "llvm.usub.sat.i32":
