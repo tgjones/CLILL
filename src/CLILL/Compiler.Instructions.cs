@@ -322,7 +322,7 @@ partial class Compiler
 
         if (ptr.IsAAllocaInst != null && context.Locals.TryGetValue(ptr, out var local) && (local.LocalType.IsPrimitive || local.LocalType.IsPointer))
         {
-            EmitValue(value, context, isStore: true);
+            EmitValue(value, context);
             context.ILGenerator.Emit(OpCodes.Stloc, local);
         }
         else
@@ -1409,10 +1409,7 @@ partial class Compiler
         context.ILGenerator.Emit(OpCodes.Br, context.GetOrCreateLabel(instruction.SwitchDefaultDest));
     }
 
-    private void EmitValue(
-        LLVMValueRef valueRef,
-        FunctionCompilationContext context,
-        bool isStore = false)
+    private void EmitValue(LLVMValueRef valueRef, FunctionCompilationContext context)
     {
         if (valueRef.IsConstant)
         {
@@ -1420,7 +1417,7 @@ partial class Compiler
         }
         else if (context.Locals.TryGetValue(valueRef, out var local))
         {
-            if (valueRef.IsAAllocaInst != null && !isStore)
+            if (valueRef.IsAAllocaInst != null && valueRef.AllocaHasConstantNumElements())
             {
                 context.ILGenerator.Emit(OpCodes.Ldloca, local);
             }

@@ -76,6 +76,17 @@ internal static partial class LLVMExtensions
         return (LLVMTypeRef)LLVM.GetAllocatedType(instruction);
     }
 
+    public static unsafe bool AllocaHasConstantNumElements(this LLVMValueRef instruction)
+    {
+        if (instruction.Kind != LLVMValueKind.LLVMInstructionValueKind
+            || instruction.InstructionOpcode != LLVMOpcode.LLVMAlloca)
+        {
+            throw new ArgumentException("Not an alloca instruction", nameof(instruction));
+        }
+
+        return instruction.GetOperand(0).Kind == LLVMValueKind.LLVMConstantIntValueKind;
+    }
+
     public static unsafe int[] GetShuffleVectorMaskValues(this LLVMValueRef instruction)
     {
         if (instruction.Kind != LLVMValueKind.LLVMInstructionValueKind
