@@ -237,7 +237,7 @@ public class CompilerTests
     private static void RunClang(string[] arguments)
     {
         RunProgram(
-            @"..\..\..\..\..\lib\clang\win-x64\clang.exe",
+            "clang.exe",
             arguments,
             out var exitCode,
             out var standardOutput,
