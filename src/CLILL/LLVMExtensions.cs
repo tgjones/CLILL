@@ -89,6 +89,14 @@ internal static partial class LLVMExtensions
         for (var i = 0u; i < result.Length; i++)
         {
             result[i] = LLVM.GetMaskValue(instruction, i);
+
+            // An `undef` mask index is returned from `GetMaskValue` as -1.
+            // That creates problems with our indexing so we replace those
+            // values with 0.
+            if (result[i] == -1)
+            {
+                result[i] = 0;
+            }
         }
 
         return result;

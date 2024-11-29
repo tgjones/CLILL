@@ -38,14 +38,11 @@ internal sealed class CompilationContext
         TypeBuilder = typeBuilder;
     }
 
-    public unsafe int GetSizeOfTypeInBytes(LLVMTypeRef type)
-    {
-        var sizeInBits = (int)LLVM.SizeOfTypeInBits(
-            LLVM.GetModuleDataLayout(LLVMModule),
-            type);
+    public unsafe int GetSizeOfTypeInBits(LLVMTypeRef type) => (int)LLVM.SizeOfTypeInBits(
+        LLVM.GetModuleDataLayout(LLVMModule),
+        type);
 
-        return sizeInBits / 8;
-    }
+    public unsafe int GetSizeOfTypeInBytes(LLVMTypeRef type) => GetSizeOfTypeInBits(type) / 8;
 
     public unsafe ISymbolDocumentWriter DefineDocument(LLVMMetadataRef diFile)
     {

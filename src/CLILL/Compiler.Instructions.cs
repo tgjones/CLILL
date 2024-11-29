@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using CLILL.Runtime;
 using LLVMSharp.Interop;
@@ -87,7 +88,7 @@ partial class Compiler
                 break;
 
             case LLVMOpcode.LLVMBitCast:
-                EmitValue(instruction.GetOperand(0), context);
+                EmitBitCast(instruction, context);
                 break;
 
             case LLVMOpcode.LLVMBr:
@@ -243,6 +244,29 @@ partial class Compiler
 
             default:
                 throw new NotImplementedException($"Instruction {instruction.InstructionOpcode} is not implemented: {instruction}");
+        }
+    }
+
+    private void EmitBitCast(LLVMValueRef instruction, FunctionCompilationContext context)
+    {
+        EmitValue(instruction.GetOperand(0), context);
+
+        var fromType = instruction.GetOperand(0).TypeOf;
+        var toType = instruction.TypeOf;
+
+        switch (fromType.Kind)
+        {
+            case LLVMTypeKind.LLVMIntegerTypeKind:
+            case LLVMTypeKind.LLVMFloatTypeKind:
+            case LLVMTypeKind.LLVMDoubleTypeKind:
+                var bitCastMethod = typeof(Unsafe).GetMethod(nameof(Unsafe.BitCast)).MakeGenericMethod(
+                    GetMsilType(fromType, context.CompilationContext),
+                    GetMsilType(toType, context.CompilationContext));
+                context.ILGenerator.Emit(OpCodes.Call, bitCastMethod);
+                break;
+
+            default:
+                throw new InvalidOperationException();
         }
     }
 
@@ -417,7 +441,7 @@ partial class Compiler
                 : sourceVector1Local;
             var sourceVectorIndex = maskIndex < sourceVector0.TypeOf.VectorSize
                 ? maskIndex
-                : maskIndex - sourceVector0.TypeOf.VectorSize;
+                : maskIndex - (int)sourceVector0.TypeOf.VectorSize;
             context.ILGenerator.Emit(OpCodes.Ldloca, sourceVectorLocal);
             context.ILGenerator.Emit(OpCodes.Ldc_I4, sourceVectorIndex * elementSizeInBytes);
             context.ILGenerator.Emit(OpCodes.Conv_U);
@@ -569,38 +593,60 @@ partial class Compiler
     {
         var operand0 = instruction.GetOperand(0);
 
+        EmitValue(operand0, context);
+        EmitValue(instruction.GetOperand(1), context);
+
         switch (operand0.TypeOf.Kind)
         {
             case LLVMTypeKind.LLVMFloatTypeKind:
             case LLVMTypeKind.LLVMDoubleTypeKind:
+                switch (instruction.FCmpPredicate)
+                {
+                    case LLVMRealPredicate.LLVMRealOEQ:
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
+                    case LLVMRealPredicate.LLVMRealOGT:
+                        context.ILGenerator.Emit(OpCodes.Cgt);
+                        break;
+
+                    case LLVMRealPredicate.LLVMRealOLT:
+                        context.ILGenerator.Emit(OpCodes.Clt);
+                        break;
+
+                    case LLVMRealPredicate.LLVMRealUGE:
+                        context.ILGenerator.Emit(OpCodes.Clt_Un);
+                        context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
+                    default:
+                        throw new NotImplementedException($"Float comparison predicate {instruction.FCmpPredicate} not implemented: {instruction}");
+                }
+                break;
+
+            case LLVMTypeKind.LLVMVectorTypeKind:
+                var nonGenericVectorType = GetNonGenericVectorType(operand0.TypeOf, context.CompilationContext);
+                var genericVectorType = GetGenericVectorType(operand0.TypeOf, context.CompilationContext).MakeGenericType(Type.MakeGenericMethodParameter(0));
+                var vectorComparisonMethodName = instruction.FCmpPredicate switch
+                {
+                    LLVMRealPredicate.LLVMRealOEQ => nameof(Vector128.Equals),
+                    LLVMRealPredicate.LLVMRealOGT => nameof(Vector128.GreaterThan),
+                    LLVMRealPredicate.LLVMRealOLT => nameof(Vector128.LessThan),
+                    LLVMRealPredicate.LLVMRealUGE => nameof(Vector128.GreaterThanOrEqual),
+                    _ => throw new NotImplementedException($"Float comparison predicate {instruction.FCmpPredicate} not implemented for vectors: {instruction}"),
+                };
+                var genericVectorMethod = nonGenericVectorType.GetMethod(vectorComparisonMethodName);
+                var elementType = GetMsilType(operand0.TypeOf.ElementType, context.CompilationContext);
+                var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
+                context.ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
                 break;
 
             default:
-                throw new NotImplementedException();
+                throw new NotImplementedException($"FCmp not implemented for type {operand0.TypeOf.Kind}: {instruction}");
         }
-
-        EmitValue(operand0, context);
-        EmitValue(instruction.GetOperand(1), context);
 
         // TODO: Do the right thing for ordered / unordered equality comparisons.
-
-        switch (instruction.FCmpPredicate)
-        {
-            case LLVMRealPredicate.LLVMRealOEQ:
-                context.ILGenerator.Emit(OpCodes.Ceq);
-                break;
-
-            case LLVMRealPredicate.LLVMRealOGT:
-                context.ILGenerator.Emit(OpCodes.Cgt);
-                break;
-
-            case LLVMRealPredicate.LLVMRealOLT:
-                context.ILGenerator.Emit(OpCodes.Clt);
-                break;
-
-            default:
-                throw new NotImplementedException($"Float comparison predicate {instruction.FCmpPredicate} not implemented: {instruction}");
-        }
     }
 
     private enum Signedness
@@ -670,15 +716,10 @@ partial class Compiler
                 switch ((fromType.ElementType.Kind, toType.ElementType.Kind))
                 {
                     case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMFloatTypeKind):
-                        switch (fromType.ElementType.IntWidth)
-                        {
-                            case 32:
-                                context.ILGenerator.Emit(OpCodes.Call, GetNonGenericVectorType(fromType, context.CompilationContext).GetMethod("ConvertToSingle", [GetMsilType(operand.TypeOf, context.CompilationContext)]));
-                                break;
-
-                            default:
-                                throw new NotImplementedException();
-                        }
+                        var convertToSingleMethodName = $"ConvertV{operand.TypeOf.VectorSize}I{fromType.ElementType.IntWidth}ToF32";
+                        var convertToSingleMethod = typeof(VectorUtility).GetMethod(convertToSingleMethodName)
+                            ?? throw new NotImplementedException($"Vector conversion from int width {fromType.ElementType.IntWidth} to float not implemented: {instruction}");
+                        context.ILGenerator.Emit(OpCodes.Call, convertToSingleMethod);
                         break;
 
                     case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMIntegerTypeKind):
@@ -716,7 +757,63 @@ partial class Compiler
 
         for (var i = 0u; i < operandCount; i++)
         {
-            EmitValue(instruction.GetOperand(i), context);
+            var operand = instruction.GetOperand(i);
+
+            if (instruction.TypeOf.Kind == LLVMTypeKind.LLVMVectorTypeKind)
+            {
+                switch (vectorMethodName)
+                {
+                    case nameof(Vector128.ShiftLeft):
+                    case nameof(Vector128.ShiftRightArithmetic):
+                    case nameof(Vector128.ShiftRightLogical):
+                        if (i == 1)
+                        {
+                            // Amount to shift by. We currently only support constant values,
+                            // where all values in the vector are the same constant.
+                            switch (operand.Kind)
+                            {
+                                case LLVMValueKind.LLVMConstantDataVectorValueKind:
+                                    var firstValue = operand.GetAggregateElement(0);
+                                    int firstValueConstant;
+                                    switch (firstValue.Kind)
+                                    {
+                                        case LLVMValueKind.LLVMConstantIntValueKind:
+                                            firstValueConstant = (int)firstValue.ConstIntSExt;
+                                            break;
+
+                                        default:
+                                            throw new NotImplementedException();
+                                    }
+                                    for (var j = 1u; j < operand.TypeOf.VectorSize; j++)
+                                    {
+                                        var value = operand.GetAggregateElement(j);
+                                        if (firstValueConstant != (int)value.ConstIntSExt)
+                                        {
+                                            throw new NotImplementedException();
+                                        }
+                                    }
+                                    context.ILGenerator.Emit(OpCodes.Ldc_I4, firstValueConstant);
+                                    break;
+
+                                default:
+                                    throw new NotImplementedException();
+                            }
+                        }
+                        else
+                        {
+                            goto default;
+                        }
+                        break;
+
+                    default:
+                        EmitValue(operand, context);
+                        break;
+                }
+            }
+            else
+            {
+                EmitValue(operand, context);
+            }
         }
 
         switch (instruction.TypeOf.Kind)
@@ -733,10 +830,23 @@ partial class Compiler
                     throw new NotImplementedException();
                 }
                 var nonGenericVectorType = GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext);
-                var genericVectorType = GetGenericVectorType(instruction.TypeOf, context.CompilationContext).MakeGenericType(Type.MakeGenericMethodParameter(0));
-                var genericVectorMethod = nonGenericVectorType.GetMethod(vectorMethodName, Enumerable.Repeat(genericVectorType, operandCount).ToArray());
-                var elementType = GetMsilType(instruction.TypeOf.ElementType, context.CompilationContext);
-                var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
+                MethodInfo vectorMethod;
+                switch (vectorMethodName)
+                {
+                    case nameof(Vector128.ShiftLeft):
+                    case nameof(Vector128.ShiftRightArithmetic):
+                    case nameof(Vector128.ShiftRightLogical):
+                        var vectorType = GetMsilType(instruction.TypeOf, context.CompilationContext);
+                        vectorMethod = nonGenericVectorType.GetMethod(vectorMethodName, [vectorType, typeof(int)]);
+                        break;
+
+                    default:
+                        var genericVectorType = GetGenericVectorType(instruction.TypeOf, context.CompilationContext).MakeGenericType(Type.MakeGenericMethodParameter(0));
+                        var genericVectorMethod = nonGenericVectorType.GetMethod(vectorMethodName, Enumerable.Repeat(genericVectorType, operandCount).ToArray()); ;
+                        var elementType = GetMsilType(instruction.TypeOf.ElementType, context.CompilationContext);
+                        vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
+                        break;
+                }
                 context.ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
                 break;
 
@@ -1170,19 +1280,40 @@ partial class Compiler
 
     private void EmitSelect(LLVMValueRef instruction, FunctionCompilationContext context)
     {
-        var trueLabel = context.ILGenerator.DefineLabel();
-        var endLabel = context.ILGenerator.DefineLabel();
+        var operand0 = instruction.GetOperand(0);
+        switch (operand0.TypeOf.Kind)
+        {
+            case LLVMTypeKind.LLVMIntegerTypeKind:
+                var trueLabel = context.ILGenerator.DefineLabel();
+                var endLabel = context.ILGenerator.DefineLabel();
 
-        var branchOpcode = EmitBranchCondition(instruction.GetOperand(0), context);
-        context.ILGenerator.Emit(branchOpcode, trueLabel);
+                var branchOpcode = EmitBranchCondition(operand0, context);
+                context.ILGenerator.Emit(branchOpcode, trueLabel);
 
-        EmitValue(instruction.GetOperand(2), context);
-        context.ILGenerator.Emit(OpCodes.Br, endLabel);
+                EmitValue(instruction.GetOperand(2), context);
+                context.ILGenerator.Emit(OpCodes.Br, endLabel);
 
-        context.ILGenerator.MarkLabel(trueLabel);
-        EmitValue(instruction.GetOperand(1), context);
+                context.ILGenerator.MarkLabel(trueLabel);
+                EmitValue(instruction.GetOperand(1), context);
 
-        context.ILGenerator.MarkLabel(endLabel);
+                context.ILGenerator.MarkLabel(endLabel);
+                break;
+
+            case LLVMTypeKind.LLVMVectorTypeKind:
+                var operand1 = instruction.GetOperand(1);
+
+                EmitValue(operand0, context);
+                EmitValue(operand1, context);
+                EmitValue(instruction.GetOperand(2), context);
+
+                var elementType = GetMsilType(operand1.TypeOf.ElementType, context.CompilationContext);
+                var conditionalSelectMethod = GetNonGenericVectorType(operand1.TypeOf, context.CompilationContext).GetMethod(nameof(Vector128.ConditionalSelect)).MakeGenericMethod(elementType);
+                context.ILGenerator.Emit(OpCodes.Call, conditionalSelectMethod);
+                break;
+
+            default:
+                throw new NotImplementedException();
+        }
     }
 
     private readonly record struct SwitchCase(int ConstantValue, LLVMValueRef Value, LLVMBasicBlockRef Destination)
@@ -1479,7 +1610,7 @@ partial class Compiler
                         break;
 
                     case LLVMTypeKind.LLVMVectorTypeKind:
-                        ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetProperty("Zero").GetGetMethod());
+                        ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetMethod("get_Zero"));
                         break;
 
                     default:

@@ -1,7 +1,9 @@
 using System;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using CLILL.Runtime;
 using LLVMSharp.Interop;
 
 namespace CLILL;
@@ -23,24 +25,15 @@ partial class Compiler
 
             case LLVMTypeKind.LLVMIntegerTypeKind:
                 var intTypeWidth = typeRef.IntWidth;
-                switch (intTypeWidth)
+                return intTypeWidth switch
                 {
-                    case 1: // TODO: really?
-                    case 32:
-                        return typeof(int);
-
-                    case 8:
-                        return typeof(byte);
-
-                    case 16:
-                        return typeof(short);
-
-                    case 64:
-                        return typeof(long);
-
-                    default:
-                        throw new NotImplementedException($"Integer width {intTypeWidth} not implemented: {typeRef}");
-                }
+                    1 => typeof(bool),
+                    32 => typeof(int),
+                    8 => typeof(byte),
+                    16 => typeof(short),
+                    64 => typeof(long),
+                    _ => throw new NotImplementedException($"Integer width {intTypeWidth} not implemented: {typeRef}"),
+                };
 
             case LLVMTypeKind.LLVMPointerTypeKind:
                 return typeof(void*);
@@ -70,7 +63,7 @@ partial class Compiler
 
         return vectorSize switch
         {
-            8 or 16 or 32 or 64 => GetGenericVectorType(typeRef, context).MakeGenericType(GetMsilType(typeRef.ElementType, context)),
+            2 or 8 or 16 or 32 or 64 => GetGenericVectorType(typeRef, context).MakeGenericType(GetMsilType(typeRef.ElementType, context)),
             _ => CreateArrayOrVectorType(typeRef.ElementType, context, (int)typeRef.VectorSize),
         };
     }
@@ -91,8 +84,8 @@ partial class Compiler
         }
 
         var packingSize = typeRef.IsPackedStruct
-            ? System.Reflection.Emit.PackingSize.Size1
-            : System.Reflection.Emit.PackingSize.Unspecified;
+            ? PackingSize.Size1
+            : PackingSize.Unspecified;
 
         var structType = context.ModuleBuilder.DefineType(
             structName,
@@ -165,60 +158,104 @@ partial class Compiler
                 FieldAttributes.Private);
         }
 
+        var zeroPropertyGetter = structType.DefineMethod(
+            "get_Zero",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig | MethodAttributes.SpecialName,
+            CallingConventions.Standard,
+            structType,
+            []);
+
+        var zeroPropertyGetterILGenerator = zeroPropertyGetter.GetILGenerator();
+        var local = zeroPropertyGetterILGenerator.DeclareLocal(structType);
+        zeroPropertyGetterILGenerator.Emit(OpCodes.Ldloca_S, local);
+        zeroPropertyGetterILGenerator.Emit(OpCodes.Initobj, structType);
+        zeroPropertyGetterILGenerator.Emit(OpCodes.Ldloc_0);
+        zeroPropertyGetterILGenerator.Emit(OpCodes.Ret);
+
+        var zeroProperty = structType.DefineProperty(
+            "Zero",
+            PropertyAttributes.None,
+            structType,
+            []);
+
+        zeroProperty.SetGetMethod(zeroPropertyGetter);
+
         return structType.CreateType();
     }
 
     private static Type GetNonGenericVectorType(LLVMTypeRef vectorType, CompilationContext context)
     {
-        var vectorSize = context.GetSizeOfTypeInBytes(vectorType);
-
-        return vectorSize switch
+        var vectorSizeInBits = vectorType.VectorSize * RoundUpToTypeSize(context.GetSizeOfTypeInBits(vectorType.ElementType));
+        if (vectorSizeInBits > MaxVectorSize)
         {
-            8 => typeof(Vector64),
-            16 => typeof(Vector128),
-            32 => typeof(Vector256),
-            64 => typeof(Vector512),
-            _ => throw new NotImplementedException()
-        };
-    }
+            throw new NotImplementedException();
+        }
 
-    private static Type GetNonGenericDoubleWidthVectorType(LLVMTypeRef vectorType, CompilationContext context)
-    {
-        var vectorSize = context.GetSizeOfTypeInBytes(vectorType);
-
-        return vectorSize switch
+        return vectorSizeInBits switch
         {
-            8 => typeof(Vector128),
-            16 => typeof(Vector256),
-            32 => typeof(Vector512),
-            _ => throw new NotImplementedException()
+            16 => typeof(Vector16),
+            64 => typeof(Vector64),
+            128 => typeof(Vector128),
+            256 => typeof(Vector256),
+            512 => typeof(Vector512),
+            _ => throw new NotImplementedException($"Vector size {vectorSizeInBits} not implemented: {vectorType}")
         };
     }
 
     private static Type GetGenericVectorType(LLVMTypeRef vectorType, CompilationContext context)
     {
-        var vectorSize = context.GetSizeOfTypeInBytes(vectorType);
-
-        return vectorSize switch
+        var vectorSizeInBits = vectorType.VectorSize * RoundUpToTypeSize(context.GetSizeOfTypeInBits(vectorType.ElementType));
+        if (vectorSizeInBits > MaxVectorSize)
         {
-            8 => typeof(Vector64<>),
-            16 => typeof(Vector128<>),
-            32 => typeof(Vector256<>),
-            64 => typeof(Vector512<>),
-            _ => throw new NotImplementedException($"Vector size {vectorSize} not implemented")
+            throw new NotImplementedException();
+        }
+
+        return vectorSizeInBits switch
+        {
+            16 => typeof(Vector16<>),
+            64 => typeof(Vector64<>),
+            128 => typeof(Vector128<>),
+            256 => typeof(Vector256<>),
+            512 => typeof(Vector512<>),
+            _ => throw new NotImplementedException($"Vector size {vectorSizeInBits} not implemented: {vectorType}")
         };
     }
 
-    private static Type GetGenericDoubleWidthVectorType(LLVMTypeRef vectorType, CompilationContext context)
-    {
-        var vectorSize = context.GetSizeOfTypeInBytes(vectorType);
+    private const int MaxVectorSize = 512;
 
-        return vectorSize switch
+    private static int RoundUpToTypeSize(int sizeInBits)
+    {
+        if (sizeInBits > 512)
         {
-            8 => typeof(Vector128<>),
-            16 => typeof(Vector256<>),
-            32 => typeof(Vector512<>),
-            _ => throw new NotImplementedException($"Vector size {vectorSize} not implemented")
-        };
+            throw new NotImplementedException();
+        }
+        else if (sizeInBits > 256)
+        {
+            return 512;
+        }
+        else if (sizeInBits > 128)
+        {
+            return 256;
+        }
+        else if (sizeInBits > 64)
+        {
+            return 128;
+        }
+        else if (sizeInBits > 32)
+        {
+            return 64;
+        }
+        else if (sizeInBits > 16)
+        {
+            return 32;
+        }
+        else if (sizeInBits > 8)
+        {
+            return 16;
+        }
+        else
+        {
+            return 8;
+        }
     }
 }
