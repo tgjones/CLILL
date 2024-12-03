@@ -133,7 +133,7 @@ public class CompilerTests
             [],
             out var llvmExitCode,
             out var llvmStandardOutput,
-            out var llvmStandardError);
+            out _);
 
         Console.WriteLine($"Native:  {stopwatch.Elapsed}");
 

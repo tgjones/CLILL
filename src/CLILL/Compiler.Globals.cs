@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using CLILL.Helpers;
 using LLVMSharp.Interop;
 
 namespace CLILL;
@@ -39,7 +40,7 @@ partial class Compiler
 
                     globalField.SetCustomAttribute(
                         new CustomAttributeBuilder(
-                            typeof(FixedAddressValueTypeAttribute).GetConstructor([]),
+                            typeof(FixedAddressValueTypeAttribute).GetConstructorStrict([]),
                             []));
 
                     EmitConstantValue(globalValue, valueType, ilGenerator, context);
@@ -190,7 +191,7 @@ partial class Compiler
                 }
                 var createMethodParameterTypes = new Type[vectorType.VectorSize];
                 Array.Fill(createMethodParameterTypes, elementType);
-                ilGenerator.Emit(OpCodes.Call, GetNonGenericVectorType(vectorType, context).GetMethod("Create", createMethodParameterTypes));
+                ilGenerator.Emit(OpCodes.Call, GetNonGenericVectorType(vectorType, context).GetMethodStrict(nameof(Vector128.Create), createMethodParameterTypes));
                 break;
 
             default:

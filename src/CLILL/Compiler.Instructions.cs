@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using CLILL.Helpers;
 using CLILL.Runtime;
 using LLVMSharp.Interop;
 
@@ -205,7 +206,7 @@ partial class Compiler
                 break;
 
             case LLVMOpcode.LLVMSRem:
-                EmitBinaryOperation(instruction, OpCodes.Rem, context);
+                EmitBinaryOperation(instruction, OpCodes.Rem, "Remainder" /* This will throw an error if it's actually used */, context);
                 break;
 
             case LLVMOpcode.LLVMSwitch:
@@ -226,12 +227,12 @@ partial class Compiler
 
             case LLVMOpcode.LLVMUnreachable:
                 ilGenerator.Emit(OpCodes.Ldstr, "Unreachable instruction");
-                ilGenerator.Emit(OpCodes.Newobj, typeof(Exception).GetConstructor([typeof(string)]));
+                ilGenerator.Emit(OpCodes.Newobj, typeof(Exception).GetConstructorStrict([typeof(string)]));
                 ilGenerator.Emit(OpCodes.Throw);
                 break;
 
             case LLVMOpcode.LLVMURem:
-                EmitBinaryOperation(instruction, OpCodes.Rem_Un, context);
+                EmitBinaryOperation(instruction, OpCodes.Rem_Un, "RemainderUnsigned" /* This will throw an error if it's actually used */, context);
                 break;
 
             case LLVMOpcode.LLVMXor:
@@ -259,7 +260,7 @@ partial class Compiler
             case LLVMTypeKind.LLVMIntegerTypeKind:
             case LLVMTypeKind.LLVMFloatTypeKind:
             case LLVMTypeKind.LLVMDoubleTypeKind:
-                var bitCastMethod = typeof(Unsafe).GetMethod(nameof(Unsafe.BitCast)).MakeGenericMethod(
+                var bitCastMethod = typeof(Unsafe).GetMethodStrict(nameof(Unsafe.BitCast)).MakeGenericMethod(
                     GetMsilType(fromType, context.CompilationContext),
                     GetMsilType(toType, context.CompilationContext));
                 context.ILGenerator.Emit(OpCodes.Call, bitCastMethod);
@@ -281,7 +282,7 @@ partial class Compiler
 
         var vectorType = instruction.GetOperand(0).TypeOf;
         var getElementMethod = GetNonGenericVectorType(vectorType, context.CompilationContext)
-            .GetMethod("GetElement")
+            .GetMethodStrict(nameof(Vector128.GetElement))
             .MakeGenericMethod(GetMsilType(vectorType.ElementType, context.CompilationContext));
         context.ILGenerator.Emit(OpCodes.Call, getElementMethod);
     }
@@ -366,7 +367,7 @@ partial class Compiler
             var scalarValueType = GetMsilType(scalarValue.TypeOf, context.CompilationContext);
             context.ILGenerator.Emit(
                 OpCodes.Call,
-                GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext).GetMethod("Create", [scalarValueType]));
+                GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext).GetMethodStrict("Create", [scalarValueType]));
 
             return;
         }
@@ -390,7 +391,7 @@ partial class Compiler
             var sourceVectorType = GetMsilType(sourceVector0.TypeOf, context.CompilationContext);
             context.ILGenerator.Emit(
                 OpCodes.Call,
-                GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext).GetMethod("Create", [sourceVectorType, sourceVectorType]));
+                GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext).GetMethodStrict("Create", [sourceVectorType, sourceVectorType]));
 
             return;
         }
@@ -527,7 +528,7 @@ partial class Compiler
         var valueOperand = instruction.GetOperand(1);
         EmitValue(valueOperand, context);
 
-        var withElementMethod = GetNonGenericVectorType(vectorOperand.TypeOf, context.CompilationContext).GetMethod(nameof(Vector128.WithElement)).MakeGenericMethod(GetMsilType(valueOperand.TypeOf, context.CompilationContext));
+        var withElementMethod = GetNonGenericVectorType(vectorOperand.TypeOf, context.CompilationContext).GetMethodStrict(nameof(Vector128.WithElement)).MakeGenericMethod(GetMsilType(valueOperand.TypeOf, context.CompilationContext));
         context.ILGenerator.Emit(OpCodes.Call, withElementMethod);
     }
 
@@ -636,7 +637,7 @@ partial class Compiler
                     LLVMRealPredicate.LLVMRealUGE => nameof(Vector128.GreaterThanOrEqual),
                     _ => throw new NotImplementedException($"Float comparison predicate {instruction.FCmpPredicate} not implemented for vectors: {instruction}"),
                 };
-                var genericVectorMethod = nonGenericVectorType.GetMethod(vectorComparisonMethodName);
+                var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorComparisonMethodName);
                 var elementType = GetMsilType(operand0.TypeOf.ElementType, context.CompilationContext);
                 var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
                 context.ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
@@ -717,15 +718,14 @@ partial class Compiler
                 {
                     case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMFloatTypeKind):
                         var convertToSingleMethodName = $"ConvertV{operand.TypeOf.VectorSize}I{fromType.ElementType.IntWidth}ToF32";
-                        var convertToSingleMethod = typeof(VectorUtility).GetMethod(convertToSingleMethodName)
-                            ?? throw new NotImplementedException($"Vector conversion from int width {fromType.ElementType.IntWidth} to float not implemented: {instruction}");
+                        var convertToSingleMethod = typeof(VectorUtility).GetMethodStrict(convertToSingleMethodName);
                         context.ILGenerator.Emit(OpCodes.Call, convertToSingleMethod);
                         break;
 
                     case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMIntegerTypeKind):
                         if (fromType.ElementType.IntWidth > toType.ElementType.IntWidth)
                         {
-                            context.ILGenerator.Emit(OpCodes.Call, typeof(VectorUtility).GetMethod(nameof(VectorUtility.Narrow), [GetMsilType(operand.TypeOf, context.CompilationContext)]));
+                            context.ILGenerator.Emit(OpCodes.Call, typeof(VectorUtility).GetMethodStrict(nameof(VectorUtility.Narrow), [GetMsilType(operand.TypeOf, context.CompilationContext)]));
                         }
                         else
                         {
@@ -774,16 +774,11 @@ partial class Compiler
                             {
                                 case LLVMValueKind.LLVMConstantDataVectorValueKind:
                                     var firstValue = operand.GetAggregateElement(0);
-                                    int firstValueConstant;
-                                    switch (firstValue.Kind)
+                                    var firstValueConstant = firstValue.Kind switch
                                     {
-                                        case LLVMValueKind.LLVMConstantIntValueKind:
-                                            firstValueConstant = (int)firstValue.ConstIntSExt;
-                                            break;
-
-                                        default:
-                                            throw new NotImplementedException();
-                                    }
+                                        LLVMValueKind.LLVMConstantIntValueKind => (int)firstValue.ConstIntSExt,
+                                        _ => throw new NotImplementedException(),
+                                    };
                                     for (var j = 1u; j < operand.TypeOf.VectorSize; j++)
                                     {
                                         var value = operand.GetAggregateElement(j);
@@ -837,12 +832,12 @@ partial class Compiler
                     case nameof(Vector128.ShiftRightArithmetic):
                     case nameof(Vector128.ShiftRightLogical):
                         var vectorType = GetMsilType(instruction.TypeOf, context.CompilationContext);
-                        vectorMethod = nonGenericVectorType.GetMethod(vectorMethodName, [vectorType, typeof(int)]);
+                        vectorMethod = nonGenericVectorType.GetMethodStrict(vectorMethodName, [vectorType, typeof(int)]);
                         break;
 
                     default:
                         var genericVectorType = GetGenericVectorType(instruction.TypeOf, context.CompilationContext).MakeGenericType(Type.MakeGenericMethodParameter(0));
-                        var genericVectorMethod = nonGenericVectorType.GetMethod(vectorMethodName, Enumerable.Repeat(genericVectorType, operandCount).ToArray()); ;
+                        var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorMethodName, Enumerable.Repeat(genericVectorType, operandCount).ToArray()); ;
                         var elementType = GetMsilType(instruction.TypeOf.ElementType, context.CompilationContext);
                         vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
                         break;
@@ -862,14 +857,6 @@ partial class Compiler
         FunctionCompilationContext context)
     {
         EmitUnaryOrBinaryOperation(instruction, scalarOpCode, vectorMethodName, context, 1);
-    }
-
-    private void EmitBinaryOperation(
-        LLVMValueRef instruction,
-        OpCode scalarOpCode,
-        FunctionCompilationContext context)
-    {
-        EmitBinaryOperation(instruction, scalarOpCode, null, context);
     }
 
     private void EmitBinaryOperation(
@@ -970,6 +957,10 @@ partial class Compiler
 
             case "llvm.dbg.value":
                 // TODO
+                return;
+
+            case "llvm.experimental.noalias.scope.decl":
+                // No-op.
                 return;
 
             case "llvm.lifetime.start.p0":
@@ -1307,7 +1298,9 @@ partial class Compiler
                 EmitValue(instruction.GetOperand(2), context);
 
                 var elementType = GetMsilType(operand1.TypeOf.ElementType, context.CompilationContext);
-                var conditionalSelectMethod = GetNonGenericVectorType(operand1.TypeOf, context.CompilationContext).GetMethod(nameof(Vector128.ConditionalSelect)).MakeGenericMethod(elementType);
+                var conditionalSelectMethod = GetNonGenericVectorType(operand1.TypeOf, context.CompilationContext)
+                    .GetMethodStrict(nameof(Vector128.ConditionalSelect))
+                    .MakeGenericMethod(elementType);
                 context.ILGenerator.Emit(OpCodes.Call, conditionalSelectMethod);
                 break;
 
@@ -1479,7 +1472,7 @@ partial class Compiler
                         break;
 
                     case LLVMTypeKind.LLVMVectorTypeKind:
-                        ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetProperty("Zero").GetGetMethod());
+                        ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetMethodStrict("get_Zero"));
                         break;
 
                     default:
@@ -1607,7 +1600,7 @@ partial class Compiler
                         break;
 
                     case LLVMTypeKind.LLVMVectorTypeKind:
-                        ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetMethod("get_Zero"));
+                        ilGenerator.Emit(OpCodes.Call, GetMsilVectorType(valueTypeRef, context).GetMethodStrict("get_Zero"));
                         break;
 
                     default:

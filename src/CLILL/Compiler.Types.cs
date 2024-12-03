@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using CLILL.Helpers;
 using CLILL.Runtime;
 using LLVMSharp.Interop;
 
@@ -96,7 +97,7 @@ partial class Compiler
         for (var i = 0; i < typeRef.StructElementTypes.Length; i++)
         {
             var structElementTypeRef = typeRef.StructElementTypes[i];
-            var field = structType.DefineField(
+            structType.DefineField(
                 $"Field{i}",
                 GetMsilType(structElementTypeRef, context),
                 FieldAttributes.Public);
@@ -147,7 +148,7 @@ partial class Compiler
         if (length > 0)
         {
             var customAttributeBuilder = new System.Reflection.Emit.CustomAttributeBuilder(
-                typeof(InlineArrayAttribute).GetConstructor([typeof(int)]),
+                typeof(InlineArrayAttribute).GetConstructorStrict([typeof(int)]),
                 [length]);
 
             structType.SetCustomAttribute(customAttributeBuilder);

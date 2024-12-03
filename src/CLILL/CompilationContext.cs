@@ -18,7 +18,7 @@ internal sealed class CompilationContext
     public readonly TypeBuilder TypeBuilder;
 
     public readonly Dictionary<LLVMValueRef, FieldInfo> Globals = [];
-    public readonly Dictionary<LLVMValueRef, MethodBuilder> Functions = [];
+    public readonly Dictionary<LLVMValueRef, MethodInfo> Functions = [];
 
     public readonly ConcurrentDictionary<LLVMTypeRef, Type> StructTypes = [];
     public readonly ConcurrentDictionary<LLVMTypeRef, Type> ArrayTypes = [];

@@ -9,6 +9,7 @@ using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 using System.Runtime.Versioning;
+using CLILL.Helpers;
 using LLVMSharp.Interop;
 
 namespace CLILL;
@@ -47,14 +48,13 @@ public sealed partial class Compiler : IDisposable
             typeof(object).Assembly);
 
         var targetFrameworkAttributeBuilder = new CustomAttributeBuilder(
-            typeof(TargetFrameworkAttribute).GetConstructor([typeof(string)]),
+            typeof(TargetFrameworkAttribute).GetConstructorStrict([typeof(string)]),
             [".NETCoreApp,Version=v9.0"],
-            [typeof(TargetFrameworkAttribute).GetProperty("FrameworkDisplayName")],
+            [typeof(TargetFrameworkAttribute).GetPropertyStrict(nameof(TargetFrameworkAttribute.FrameworkDisplayName))],
             [".NET 9.0"]);
         assemblyBuilder.SetCustomAttribute(targetFrameworkAttributeBuilder);
 
-        var dynamicModule = assemblyBuilder.DefineDynamicModule(
-            assemblyName.Name);
+        var dynamicModule = assemblyBuilder.DefineDynamicModule(outputName);
 
         var typeBuilder = dynamicModule.DefineType(
             "Program",
@@ -69,7 +69,7 @@ public sealed partial class Compiler : IDisposable
 
         CompileGlobals(compilationContext);
 
-        MethodInfo entryPoint = null;
+        MethodInfo? entryPoint = null;
 
         var function = _module.FirstFunction;
         while (function.Handle != IntPtr.Zero)
@@ -174,7 +174,7 @@ public sealed partial class Compiler : IDisposable
         var runtimeDll = "CLILL.Runtime.dll";
         File.Copy(
             runtimeDll,
-            Path.Combine(Path.GetDirectoryName(outputPath), runtimeDll),
+            Path.Combine(Path.GetDirectoryName(outputPath) ?? "", runtimeDll),
             true);
     }
 
