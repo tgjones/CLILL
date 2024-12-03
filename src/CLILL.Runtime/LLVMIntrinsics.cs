@@ -14,6 +14,9 @@ public static unsafe class LLVMIntrinsics
     public static float FAbsF32(float val) => MathF.Abs(val);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static double FAbsF64(double val) => Math.Abs(val);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float FMulAddF32(float a, float b, float c) => MathF.FusedMultiplyAdd(a, b, c);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

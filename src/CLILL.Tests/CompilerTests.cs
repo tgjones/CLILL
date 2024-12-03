@@ -4,13 +4,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace CLILL.Tests;
 
 [TestClass]
-public class CompilerTests
+public partial class CompilerTests
 {
+    private static readonly string RepoRoot = Path.Combine(Environment.CurrentDirectory, "..", "..", "..", "..", "..");
+    private static readonly string TestProgramsPath = Path.Combine(RepoRoot, "tests");
+    private static readonly string ClangPath = Path.Combine(RepoRoot, "lib", "clang", "win-x64", "clang.exe");
+
     private static IEnumerable<object[]> TestFiles(IEnumerable<string> testFiles)
     {
         var optimizationLevels = new string[]
@@ -30,8 +35,8 @@ public class CompilerTests
     }
 
     private static IEnumerable<object[]> TestDataArbitrary() => TestFiles(
-        Directory.GetFiles(Path.Combine("TestPrograms", "arbitrary"), "*.c", SearchOption.AllDirectories)
-        .Concat(Directory.GetFiles(Path.Combine("TestPrograms", "arbitrary"), "*.cpp", SearchOption.AllDirectories)));
+        Directory.GetFiles(Path.Combine(TestProgramsPath, "arbitrary"), "*.c", SearchOption.AllDirectories)
+        .Concat(Directory.GetFiles(Path.Combine(TestProgramsPath, "arbitrary"), "*.cpp", SearchOption.AllDirectories)));
 
     [TestMethod]
     [DynamicData(nameof(TestDataArbitrary), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
@@ -45,7 +50,7 @@ public class CompilerTests
             out var managedStandardError);
 
         // Compile to executable binary.
-        var binaryPath = GetFullTestName(testName, optimizationLevel) + "_native.exe";
+        var binaryPath = GetOutputPath(testName, optimizationLevel) + "_native.exe";
         RunClang([GetSourceFilePath(testName), "-o", binaryPath, $"-{optimizationLevel}"]);
 
         RunProgram(
@@ -65,7 +70,7 @@ public class CompilerTests
 
     private static IEnumerable<object[]> TestDataCTestSuite() => TestFiles(
         Directory
-        .GetFiles(Path.Combine("TestPrograms", "c-testsuite"), "*.c", SearchOption.AllDirectories)
+        .GetFiles(Path.Combine(TestProgramsPath, "c-testsuite"), "*.c", SearchOption.AllDirectories)
         .Where(x => Path.GetFileNameWithoutExtension(x) switch
         {
             // These tests are not supported on Windows because they use `extern int printf(...)`
@@ -101,9 +106,44 @@ public class CompilerTests
         Console.WriteLine($"Stdout: {managedStandardOutput}");
     }
 
+    private static IEnumerable<object[]> TestDataFujitsuCompilerTestSuite() => TestFiles(
+        Directory.GetFiles(Path.Combine(TestProgramsPath, "fujitsu-compiler-test-suite"), "*.c", SearchOption.AllDirectories));
+
+    [GeneratedRegex(@"exit (\d+)")]
+    private static partial Regex FujitsuCompilerTestSuiteExitCodeRegex();
+
+    [TestMethod]
+    [DynamicData(nameof(TestDataFujitsuCompilerTestSuite), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
+    public void FujitsuCompilerTestSuite(string testName, string optimizationLevel)
+    {
+        CompileAndExecuteManaged(
+            testName,
+            optimizationLevel,
+            out var managedExitCode,
+            out var managedStandardOutput,
+            out var managedStandardError);
+
+        var referenceOutput = File
+            .ReadLines(Path.ChangeExtension(GetSourceFilePath(testName), ".reference_output"))
+            .ToArray();
+
+        var nativeStandardOutput = referenceOutput[0] + Environment.NewLine;
+
+        var nativeExitCodeMatch = FujitsuCompilerTestSuiteExitCodeRegex().Match(referenceOutput[1]);
+        var nativeExitCode = nativeExitCodeMatch.Success
+            ? int.Parse(nativeExitCodeMatch.Groups[1].Value)
+            : throw new InvalidOperationException("Invalid exit code");
+
+        Assert.AreEqual("", managedStandardError);
+        Assert.AreEqual(nativeStandardOutput, managedStandardOutput);
+        Assert.AreEqual(nativeExitCode, managedExitCode);
+
+        Console.WriteLine($"Stdout: {managedStandardOutput}");
+    }
+
     private static IEnumerable<object[]> TestDataBenchmarks() => TestFiles(
         Directory
-        .GetFiles(Path.Combine("TestPrograms", "benchmarks"), "*.c", SearchOption.AllDirectories));
+        .GetFiles(Path.Combine(TestProgramsPath, "benchmarks"), "*.c", SearchOption.AllDirectories));
 
     [TestMethod]
     [DynamicData(nameof(TestDataBenchmarks), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
@@ -112,7 +152,7 @@ public class CompilerTests
         var managedExePath = CompileManaged(testName, optimizationLevel);
 
         // Compile to executable binary.
-        var binaryPath = GetFullTestName(testName, optimizationLevel) + "_native.exe";
+        var binaryPath = GetOutputPath(testName, optimizationLevel) + "_native.exe";
         RunClang([GetSourceFilePath(testName), "-o", binaryPath, $"-{optimizationLevel}"]);
 
         var stopwatch = Stopwatch.StartNew();
@@ -143,9 +183,15 @@ public class CompilerTests
         Console.WriteLine($"Stdout: {managedStandardOutput}");
     }
 
-    private static string GetFullTestName(string testName, string optimizationLevel) => $"{testName}_{optimizationLevel}";
+    private static string GetOutputPath(string testName, string optimizationLevel)
+    {
+        var outputFilePath = $"{Path.Combine(Environment.CurrentDirectory, "output", Path.GetRelativePath(TestProgramsPath, testName))}_{optimizationLevel}";
+        var outputDirectory = Path.GetDirectoryName(outputFilePath) ?? throw new InvalidOperationException("No directory");
+        Directory.CreateDirectory(outputDirectory);
+        return outputFilePath;
+    }
 
-    private static string GetSourceFilePath(string testName) => Path.Combine(Environment.CurrentDirectory, testName);
+    private static string GetSourceFilePath(string testName) => Path.Combine(TestProgramsPath, testName);
 
     private static void CompileAndExecuteManaged(
         string testName,
@@ -167,7 +213,7 @@ public class CompilerTests
 
     private static string CompileManaged(string testName, string optimizationLevel)
     {
-        var fullTestName = GetFullTestName(testName, optimizationLevel);
+        var fullTestName = GetOutputPath(testName, optimizationLevel);
 
         var irPath = fullTestName + ".ll";
 
@@ -237,7 +283,7 @@ public class CompilerTests
     private static void RunClang(string[] arguments)
     {
         RunProgram(
-            "clang.exe",
+            ClangPath,
             arguments,
             out var exitCode,
             out var standardOutput,
