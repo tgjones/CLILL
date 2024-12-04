@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -136,16 +137,29 @@ public partial class CompilerTests
             out var managedStandardOutput,
             out var managedStandardError);
 
-        var referenceOutput = File
-            .ReadLines(Path.ChangeExtension(GetSourceFilePath(testName), ".reference_output"))
-            .ToArray();
+        var referenceOutputLines = File.ReadLines(Path.ChangeExtension(GetSourceFilePath(testName), ".reference_output"));
 
-        var nativeStandardOutput = referenceOutput[0] + Environment.NewLine;
+        var nativeStandardOutputBuilder = new StringBuilder();
+        int? nativeExitCode = null;
 
-        var nativeExitCodeMatch = FujitsuCompilerTestSuiteExitCodeRegex().Match(referenceOutput[1]);
-        var nativeExitCode = nativeExitCodeMatch.Success
-            ? int.Parse(nativeExitCodeMatch.Groups[1].Value)
-            : throw new InvalidOperationException("Invalid exit code");
+        foreach (var referenceOutputLine in referenceOutputLines)
+        {
+            var nativeExitCodeMatch = FujitsuCompilerTestSuiteExitCodeRegex().Match(referenceOutputLine);
+            if (nativeExitCodeMatch.Success)
+            {
+                nativeExitCode = int.Parse(nativeExitCodeMatch.Groups[1].Value);
+                break;
+            }
+
+            nativeStandardOutputBuilder.AppendLine(referenceOutputLine);
+        }
+
+        if (nativeExitCode == null)
+        {
+            throw new InvalidOperationException("Missing exit code");
+        }
+
+        var nativeStandardOutput = nativeStandardOutputBuilder.ToString();
 
         Assert.AreEqual("", managedStandardError);
         Assert.AreEqual(nativeStandardOutput, managedStandardOutput);
