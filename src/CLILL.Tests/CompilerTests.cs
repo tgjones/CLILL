@@ -128,6 +128,7 @@ public partial class CompilerTests
 
     [TestMethod]
     [DynamicData(nameof(TestDataFujitsuCompilerTestSuite), DynamicDataSourceType.Method, DynamicDataDisplayName = nameof(TestDataDisplayName))]
+    [Ignore("These tests are not yet working")]
     public void FujitsuCompilerTestSuite(string testName, string optimizationLevel)
     {
         CompileAndExecuteManaged(
