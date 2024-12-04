@@ -195,6 +195,7 @@ partial class Compiler
         return vectorSizeInBits switch
         {
             16 => typeof(Vector16),
+            32 => typeof(Vector32),
             64 => typeof(Vector64),
             128 => typeof(Vector128),
             256 => typeof(Vector256),

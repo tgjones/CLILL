@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Text;
 using CLILL.Helpers;
 using CLILL.Runtime;
 using LLVMSharp.Interop;
@@ -136,6 +137,10 @@ partial class Compiler
                 EmitConversion(instruction, context, Signedness.Unsigned);
                 break;
 
+            case LLVMOpcode.LLVMFPToSI:
+                EmitConversion(instruction, context, Signedness.Signed);
+                break;
+
             case LLVMOpcode.LLVMFPTrunc:
                 EmitConversion(instruction, context, Signedness.Unsigned);
                 break;
@@ -206,7 +211,7 @@ partial class Compiler
                 break;
 
             case LLVMOpcode.LLVMSRem:
-                EmitBinaryOperation(instruction, OpCodes.Rem, "Remainder" /* This will throw an error if it's actually used */, context);
+                EmitBinaryOperation(instruction, OpCodes.Rem, "SignedRemainder", context);
                 break;
 
             case LLVMOpcode.LLVMSwitch:
@@ -232,7 +237,7 @@ partial class Compiler
                 break;
 
             case LLVMOpcode.LLVMURem:
-                EmitBinaryOperation(instruction, OpCodes.Rem_Un, "RemainderUnsigned" /* This will throw an error if it's actually used */, context);
+                EmitBinaryOperation(instruction, OpCodes.Rem_Un, "UnsignedRemainder", context);
                 break;
 
             case LLVMOpcode.LLVMXor:
@@ -534,59 +539,81 @@ partial class Compiler
 
     private void EmitICmp(LLVMValueRef instruction, FunctionCompilationContext context)
     {
-        var left = instruction.GetOperand(0);
+        var operand0 = instruction.GetOperand(0);
 
-        if (left.TypeOf.Kind != LLVMTypeKind.LLVMIntegerTypeKind
-            && left.TypeOf.Kind != LLVMTypeKind.LLVMPointerTypeKind)
-        {
-            throw new NotImplementedException($"Unsupported icmp operand type {left.TypeOf.Kind}: {left.TypeOf}");
-        }
-
-        EmitValue(left, context);
+        EmitValue(operand0, context);
         EmitValue(instruction.GetOperand(1), context);
 
-        switch (instruction.ICmpPredicate)
+        switch (operand0.TypeOf.Kind)
         {
-            case LLVMIntPredicate.LLVMIntEQ:
-                context.ILGenerator.Emit(OpCodes.Ceq);
+            case LLVMTypeKind.LLVMIntegerTypeKind:
+            case LLVMTypeKind.LLVMPointerTypeKind:
+                switch (instruction.ICmpPredicate)
+                {
+                    case LLVMIntPredicate.LLVMIntEQ:
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
+                    case LLVMIntPredicate.LLVMIntNE:
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
+                    case LLVMIntPredicate.LLVMIntSGE:
+                        context.ILGenerator.Emit(OpCodes.Clt);
+                        context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
+                    case LLVMIntPredicate.LLVMIntSGT:
+                        context.ILGenerator.Emit(OpCodes.Cgt);
+                        break;
+
+                    case LLVMIntPredicate.LLVMIntSLE:
+                        context.ILGenerator.Emit(OpCodes.Cgt);
+                        context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
+                    case LLVMIntPredicate.LLVMIntSLT:
+                        context.ILGenerator.Emit(OpCodes.Clt);
+                        break;
+
+                    case LLVMIntPredicate.LLVMIntUGT:
+                        context.ILGenerator.Emit(OpCodes.Cgt_Un);
+                        break;
+
+                    case LLVMIntPredicate.LLVMIntULT:
+                        context.ILGenerator.Emit(OpCodes.Clt_Un);
+                        break;
+
+                    default:
+                        throw new NotImplementedException($"Integer comparison predicate {instruction.ICmpPredicate} not implemented: {instruction}");
+                }
                 break;
 
-            case LLVMIntPredicate.LLVMIntNE:
-                context.ILGenerator.Emit(OpCodes.Ceq);
-                context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
-                context.ILGenerator.Emit(OpCodes.Ceq);
-                break;
-
-            case LLVMIntPredicate.LLVMIntSGE:
-                context.ILGenerator.Emit(OpCodes.Clt);
-                context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
-                context.ILGenerator.Emit(OpCodes.Ceq);
-                break;
-
-            case LLVMIntPredicate.LLVMIntSGT:
-                context.ILGenerator.Emit(OpCodes.Cgt);
-                break;
-
-            case LLVMIntPredicate.LLVMIntSLE:
-                context.ILGenerator.Emit(OpCodes.Cgt);
-                context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
-                context.ILGenerator.Emit(OpCodes.Ceq);
-                break;
-
-            case LLVMIntPredicate.LLVMIntSLT:
-                context.ILGenerator.Emit(OpCodes.Clt);
-                break;
-
-            case LLVMIntPredicate.LLVMIntUGT:
-                context.ILGenerator.Emit(OpCodes.Cgt_Un);
-                break;
-
-            case LLVMIntPredicate.LLVMIntULT:
-                context.ILGenerator.Emit(OpCodes.Clt_Un);
+            case LLVMTypeKind.LLVMVectorTypeKind:
+                var nonGenericVectorType = GetNonGenericVectorType(operand0.TypeOf, context.CompilationContext);
+                var genericVectorType = GetGenericVectorType(operand0.TypeOf, context.CompilationContext).MakeGenericType(Type.MakeGenericMethodParameter(0));
+                var vectorComparisonMethodName = instruction.ICmpPredicate switch
+                {
+                    LLVMIntPredicate.LLVMIntEQ => nameof(Vector128.Equals),
+                    LLVMIntPredicate.LLVMIntSGE => nameof(Vector128.GreaterThanOrEqual),
+                    LLVMIntPredicate.LLVMIntSGT => nameof(Vector128.GreaterThan),
+                    LLVMIntPredicate.LLVMIntSLT => nameof(Vector128.LessThan),
+                    LLVMIntPredicate.LLVMIntUGT => nameof(Vector128.GreaterThan),
+                    LLVMIntPredicate.LLVMIntULT => nameof(Vector128.LessThan),
+                    _ => throw new NotImplementedException($"Integer comparison predicate {instruction.ICmpPredicate} not implemented for vectors: {instruction}"),
+                };
+                var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorComparisonMethodName);
+                var elementType = GetMsilType(operand0.TypeOf.ElementType, context.CompilationContext);
+                var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
+                context.ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
                 break;
 
             default:
-                throw new NotImplementedException($"Integer comparison predicate {instruction.ICmpPredicate} not implemented: {instruction}");
+                throw new NotImplementedException($"FCmp not implemented for type {operand0.TypeOf.Kind}: {instruction}");
         }
     }
 
@@ -607,6 +634,12 @@ partial class Compiler
                         context.ILGenerator.Emit(OpCodes.Ceq);
                         break;
 
+                    case LLVMRealPredicate.LLVMRealOGE:
+                        context.ILGenerator.Emit(OpCodes.Clt);
+                        context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
                     case LLVMRealPredicate.LLVMRealOGT:
                         context.ILGenerator.Emit(OpCodes.Cgt);
                         break;
@@ -617,6 +650,16 @@ partial class Compiler
 
                     case LLVMRealPredicate.LLVMRealUGE:
                         context.ILGenerator.Emit(OpCodes.Clt_Un);
+                        context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
+                        context.ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
+                    case LLVMRealPredicate.LLVMRealULT:
+                        context.ILGenerator.Emit(OpCodes.Clt_Un);
+                        break;
+
+                    case LLVMRealPredicate.LLVMRealUNE:
+                        context.ILGenerator.Emit(OpCodes.Ceq);
                         context.ILGenerator.Emit(OpCodes.Ldc_I4_0);
                         context.ILGenerator.Emit(OpCodes.Ceq);
                         break;
@@ -674,6 +717,43 @@ partial class Compiler
                 break;
 
             case LLVMTypeKind.LLVMIntegerTypeKind:
+                switch (instruction.InstructionOpcode)
+                {
+                    case LLVMOpcode.LLVMSExt:
+                        // Ensure source type is treated as signed.
+                        if (fromType.Kind == LLVMTypeKind.LLVMIntegerTypeKind)
+                        {
+                            switch (fromType.IntWidth)
+                            {
+                                case 8:
+                                    context.ILGenerator.Emit(OpCodes.Conv_I1);
+                                    break;
+
+                                case 16:
+                                    context.ILGenerator.Emit(OpCodes.Conv_I2);
+                                    break;
+                            }
+                        }
+                        break;
+
+                    case LLVMOpcode.LLVMZExt:
+                        // Ensure source type is treated as unsigned.
+                        if (fromType.Kind == LLVMTypeKind.LLVMIntegerTypeKind)
+                        {
+                            switch (fromType.IntWidth)
+                            {
+                                case 8:
+                                    context.ILGenerator.Emit(OpCodes.Conv_U1);
+                                    break;
+
+                                case 16:
+                                    context.ILGenerator.Emit(OpCodes.Conv_U2);
+                                    break;
+                            }
+                        }
+                        break;
+                }
+
                 switch (toType.IntWidth, signedness)
                 {
                     case (8, Signedness.Signed):
@@ -716,10 +796,13 @@ partial class Compiler
             case LLVMTypeKind.LLVMVectorTypeKind:
                 switch ((fromType.ElementType.Kind, toType.ElementType.Kind))
                 {
+                    case (LLVMTypeKind.LLVMDoubleTypeKind, LLVMTypeKind.LLVMFloatTypeKind):
+                    case (LLVMTypeKind.LLVMFloatTypeKind, LLVMTypeKind.LLVMDoubleTypeKind):
+                    case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMDoubleTypeKind):
                     case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMFloatTypeKind):
-                        var convertToSingleMethodName = $"ConvertV{operand.TypeOf.VectorSize}I{fromType.ElementType.IntWidth}ToF32";
-                        var convertToSingleMethod = typeof(VectorUtility).GetMethodStrict(convertToSingleMethodName);
-                        context.ILGenerator.Emit(OpCodes.Call, convertToSingleMethod);
+                        var convertMethodName = $"Convert{GetIntrinsicMethodSuffix(operand.TypeOf)}To{GetIntrinsicMethodSuffix(toType)}";
+                        var convertMethod = typeof(VectorUtility).GetMethodStrict(convertMethodName);
+                        context.ILGenerator.Emit(OpCodes.Call, convertMethod);
                         break;
 
                     case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMIntegerTypeKind):
@@ -835,6 +918,11 @@ partial class Compiler
                         vectorMethod = nonGenericVectorType.GetMethodStrict(vectorMethodName, [vectorType, typeof(int)]);
                         break;
 
+                    case "SignedRemainder":
+                    case "UnsignedRemainder":
+                        vectorMethod = typeof(VectorUtility).GetMethodStrict($"{vectorMethodName}{GetIntrinsicMethodSuffix(instruction.TypeOf)}");
+                        break;
+
                     default:
                         var genericVectorType = GetGenericVectorType(instruction.TypeOf, context.CompilationContext).MakeGenericType(Type.MakeGenericMethodParameter(0));
                         var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorMethodName, Enumerable.Repeat(genericVectorType, operandCount).ToArray()); ;
@@ -848,6 +936,31 @@ partial class Compiler
             default:
                 throw new NotImplementedException();
         }
+    }
+
+    private static string GetIntrinsicMethodSuffix(LLVMTypeRef typeRef)
+    {
+        var result = new StringBuilder();
+
+        if (typeRef.Kind == LLVMTypeKind.LLVMVectorTypeKind)
+        {
+            result.Append('V');
+            result.Append(typeRef.VectorSize);
+        }
+
+        var elementType = typeRef.Kind == LLVMTypeKind.LLVMVectorTypeKind
+            ? typeRef.ElementType
+            : typeRef;
+
+        result.Append(elementType.Kind switch
+        {
+            LLVMTypeKind.LLVMIntegerTypeKind => $"I{elementType.IntWidth}",
+            LLVMTypeKind.LLVMDoubleTypeKind => "F64",
+            LLVMTypeKind.LLVMFloatTypeKind => "F32",
+            _ => throw new InvalidOperationException()
+        });
+
+        return result.ToString();
     }
 
     private void EmitUnaryOperation(

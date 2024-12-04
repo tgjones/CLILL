@@ -11,6 +11,12 @@ public static unsafe class LLVMIntrinsics
     public static void Assume(bool cond) { }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float CopySignF32(float mag, float sgn) => MathF.CopySign(mag, sgn);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static double CopySignF64(double mag, double sgn) => Math.CopySign(mag, sgn);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float FAbsF32(float val) => MathF.Abs(val);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -27,6 +33,12 @@ public static unsafe class LLVMIntrinsics
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<double> FMulAddV2F64(Vector128<double> a, Vector128<double> b, Vector128<double> c) => Vector128.FusedMultiplyAdd(a, b, c);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<float> FMulAddV4F32(Vector128<float> a, Vector128<float> b, Vector128<float> c) => Vector128.FusedMultiplyAdd(a, b, c);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector256<double> FMulAddV4F64(Vector256<double> a, Vector256<double> b, Vector256<double> c) => Vector256.FusedMultiplyAdd(a, b, c);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void LifetimeEndP0(long size, void* ptr)

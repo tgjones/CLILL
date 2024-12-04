@@ -63,11 +63,16 @@ partial class Compiler
         var methodName = function.Name switch
         {
             "llvm.assume" => nameof(LLVMIntrinsics.Assume),
+            "llvm.copysign.f32" => nameof(LLVMIntrinsics.CopySignF32),
+            "llvm.copysign.f64" => nameof(LLVMIntrinsics.CopySignF64),
             "llvm.fabs.f32" => nameof(LLVMIntrinsics.FAbsF32),
+            "llvm.fabs.f64" => nameof(LLVMIntrinsics.FAbsF64),
             "llvm.fmuladd.f32" => nameof(LLVMIntrinsics.FMulAddF32),
             "llvm.fmuladd.f64" => nameof(LLVMIntrinsics.FMulAddF64),
             "llvm.fmuladd.v2f32" => nameof(LLVMIntrinsics.FMulAddV2F32),
             "llvm.fmuladd.v2f64" => nameof(LLVMIntrinsics.FMulAddV2F64),
+            "llvm.fmuladd.v4f32" => nameof(LLVMIntrinsics.FMulAddV4F32),
+            "llvm.fmuladd.v4f64" => nameof(LLVMIntrinsics.FMulAddV4F64),
             "llvm.lifetime.end.p0" => nameof(LLVMIntrinsics.LifetimeEndP0),
             "llvm.lifetime.start.p0" => nameof(LLVMIntrinsics.LifetimeStartP0),
             "llvm.memcpy.p0.p0.i64" => nameof(LLVMIntrinsics.MemCpyI64),

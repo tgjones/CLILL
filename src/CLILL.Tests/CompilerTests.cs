@@ -107,7 +107,20 @@ public partial class CompilerTests
     }
 
     private static IEnumerable<object[]> TestDataFujitsuCompilerTestSuite() => TestFiles(
-        Directory.GetFiles(Path.Combine(TestProgramsPath, "fujitsu-compiler-test-suite"), "*.c", SearchOption.AllDirectories));
+        Directory.GetFiles(Path.Combine(TestProgramsPath, "fujitsu-compiler-test-suite"), "*.c", SearchOption.AllDirectories)
+        .Where(x => Path.GetFileNameWithoutExtension(x) switch
+        {
+            // These tests cover undefined behavior for bitshifting beyond the size of the operand.
+            "0000_0025" or "0000_0026" or "0000_0031" or "0000_0032" or "0000_0034" or "0000_0035" => false,
+            "0000_0048" or "0000_0049" or "0000_0050" or "0000_0051" or "0000_0060" or "0000_0061" => false,
+            "0000_0062" or "0000_0063" or "0000_0066" or "0000_0067" or "0000_0068" or "0000_0069" => false,
+
+            // These tests don't compile correctly on MSVC because of _Complex type differences.
+            "0000_0078" or "0000_0079" or "0000_0080" or "0000_0089" or "0000_0090" or "0000_0091" => false,
+            "0000_0192" => false,
+
+            _ => true,
+        }));
 
     [GeneratedRegex(@"exit (\d+)")]
     private static partial Regex FujitsuCompilerTestSuiteExitCodeRegex();
