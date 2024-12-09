@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.SymbolStore;
 using System.IO;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -10,40 +6,36 @@ using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 using System.Runtime.Versioning;
 using CLILL.Helpers;
-using LLVMSharp.Interop;
 
 namespace CLILL;
 
-public sealed partial class Compiler : IDisposable
+public sealed partial class Compiler
 {
     public static void Compile(string inputPath, string outputPath)
     {
-        using var compiler = new Compiler(inputPath);
+        var compiler = new Compiler(inputPath, outputPath);
 
-        compiler.Compile(outputPath);
+        compiler.Compile(out var mainMethod);
+
+        compiler.Save(mainMethod);
     }
 
-    private readonly LLVMContextRef _context;
-    private readonly LLVMModuleRef _module;
+    private readonly string _inputPath;
+    private readonly string _outputPath;
 
-    private readonly Queue<(LLVMValueRef, MethodBuilder)> _methodsToCompile = new();
+    private readonly PersistedAssemblyBuilder _assemblyBuilder;
+    private readonly ModuleBuilder _moduleBuilder;
 
-    public Compiler(string inputPath)
+    private Compiler(string inputPath, string outputPath)
     {
-        _context = LLVMContextRef.Create();
+        _inputPath = inputPath;
+        _outputPath = outputPath;
 
-        using var source = LLVMSourceCode.FromFile(inputPath);
-
-        _module = _context.ParseIR(source.MemoryBuffer);
-    }
-
-    private void Compile(string outputPath)
-    {
         var outputName = Path.GetFileNameWithoutExtension(outputPath);
 
         var assemblyName = new AssemblyName(outputName);
 
-        var assemblyBuilder = new PersistedAssemblyBuilder(
+        _assemblyBuilder = new PersistedAssemblyBuilder(
             assemblyName,
             typeof(object).Assembly);
 
@@ -52,64 +44,21 @@ public sealed partial class Compiler : IDisposable
             [".NETCoreApp,Version=v9.0"],
             [typeof(TargetFrameworkAttribute).GetPropertyStrict(nameof(TargetFrameworkAttribute.FrameworkDisplayName))],
             [".NET 9.0"]);
-        assemblyBuilder.SetCustomAttribute(targetFrameworkAttributeBuilder);
+        _assemblyBuilder.SetCustomAttribute(targetFrameworkAttributeBuilder);
 
-        var dynamicModule = assemblyBuilder.DefineDynamicModule(outputName);
+        _moduleBuilder = _assemblyBuilder.DefineDynamicModule(outputName);
+    }
 
-        var typeBuilder = dynamicModule.DefineType(
-            "Program",
-            TypeAttributes.Public,
-            typeof(ValueType));
+    private void Compile(out MethodInfo? mainMethod)
+    {
+        using var moduleCompiler = new ModuleCompiler(_inputPath, _moduleBuilder);
 
-        var compilationContext = new CompilationContext(
-            _module,
-            assemblyBuilder,
-            dynamicModule,
-            typeBuilder);
+        moduleCompiler.CompileModule(out mainMethod);
+    }
 
-        CompileGlobals(compilationContext);
-
-        MethodInfo? entryPoint = null;
-
-        var function = _module.FirstFunction;
-        while (function.Handle != IntPtr.Zero)
-        {
-            if (function.Name.StartsWith("llvm."))
-            {
-                function = function.NextFunction;
-                continue;
-            }
-
-            var methodInfo = GetOrCreateMethod(function, compilationContext);
-
-            if (methodInfo.Name == "main")
-            {
-                entryPoint = methodInfo;
-            }
-
-            function = function.NextFunction;
-        }
-
-        while (_methodsToCompile.Count > 0)
-        {
-            var (functionToCompile, methodToCompile) = _methodsToCompile.Dequeue();
-
-            // TODO: Better way to know we've already compiled the method body.
-            if (methodToCompile.GetILGenerator().ILOffset != 0)
-            {
-                continue;
-            }
-
-            CompileMethodBody(functionToCompile, methodToCompile, compilationContext);
-        }
-
-        var mainMethod = entryPoint != null
-            ? CreateMainMethod(dynamicModule, entryPoint)
-            : null;
-
-        typeBuilder.CreateType();
-
-        var metadataBuilder = assemblyBuilder.GenerateMetadata(
+    private void Save(MethodInfo? mainMethod)
+    {
+        var metadataBuilder = _assemblyBuilder.GenerateMetadata(
             out var ilStream,
             out var fieldData,
             out var pdbBuilder);
@@ -126,7 +75,7 @@ public sealed partial class Compiler : IDisposable
         var portablePdbBlob = new BlobBuilder();
         var pdbContentId = portablePdbBuilder.Serialize(portablePdbBlob);
 
-        var pdbOutputPath = Path.ChangeExtension(outputPath, ".pdb");
+        var pdbOutputPath = Path.ChangeExtension(_outputPath, ".pdb");
         using (var pdbFileStream = new FileStream(pdbOutputPath, FileMode.Create, FileAccess.Write))
         {
             portablePdbBlob.WriteContentTo(pdbFileStream);
@@ -148,14 +97,14 @@ public sealed partial class Compiler : IDisposable
         var peBlob = new BlobBuilder();
         peBuilder.Serialize(peBlob);
 
-        using (var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write))
+        using (var fileStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write))
         {
             peBlob.WriteContentTo(fileStream);
         }
 
         // TODO: Make version dynamic.
         File.WriteAllText(
-            Path.ChangeExtension(outputPath, "runtimeconfig.json"),
+            Path.ChangeExtension(_outputPath, "runtimeconfig.json"),
             """
             {
               "runtimeOptions": {
@@ -174,69 +123,7 @@ public sealed partial class Compiler : IDisposable
         var runtimeDll = "CLILL.Runtime.dll";
         File.Copy(
             runtimeDll,
-            Path.Combine(Path.GetDirectoryName(outputPath) ?? "", runtimeDll),
+            Path.Combine(Path.GetDirectoryName(_outputPath) ?? "", runtimeDll),
             true);
-    }
-
-    private static MethodBuilder CreateMainMethod(ModuleBuilder moduleBuilder, MethodInfo entryPoint)
-    {
-        var method = moduleBuilder.DefineGlobalMethod(
-            "Main",
-            MethodAttributes.Static | MethodAttributes.Public,
-            CallingConventions.Standard,
-            typeof(int),
-            [typeof(string[])]);
-
-        method.DefineParameter(1, ParameterAttributes.None, "args");
-
-        var ilGenerator = method.GetILGenerator();
-
-        // TODO:
-
-        // nint* argv = (nint*)NativeMemory.Alloc((nuint)args.Length, (nuint)sizeof(nint));
-        // 
-        // for (var i = 0; i < args.Length; i++)
-        // {
-        //     argv[i] = Marshal.StringToHGlobalAnsi(args[i]);
-        // }
-        // 
-        // return main(args.Length, argv);
-
-        //ilGenerator.Emit(OpCodes.Call, typeof(Debugger).GetMethod(nameof(Debugger.Launch)));
-        //ilGenerator.Emit(OpCodes.Pop);
-
-        foreach (var parameter in entryPoint.GetParameters())
-        {
-            if (parameter.ParameterType == typeof(int))
-            {
-                ilGenerator.Emit(OpCodes.Ldc_I4_0);
-            }
-            else if (parameter.ParameterType == typeof(void*))
-            {
-                ilGenerator.Emit(OpCodes.Ldc_I4_0);
-                ilGenerator.Emit(OpCodes.Conv_U);
-            }
-            else
-            {
-                throw new NotImplementedException();
-            }
-        }
-
-        ilGenerator.Emit(OpCodes.Call, entryPoint);
-
-        if (entryPoint.ReturnType == typeof(void))
-        {
-            ilGenerator.Emit(OpCodes.Ldc_I4_0);
-        }
-
-        ilGenerator.Emit(OpCodes.Ret);
-
-        return method;
-    }
-
-    public void Dispose()
-    {
-        _module.Dispose();
-        _context.Dispose();
     }
 }

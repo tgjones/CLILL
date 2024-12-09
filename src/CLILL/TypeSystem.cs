@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Concurrent;
+using System.Diagnostics.SymbolStore;
+using System.IO;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
@@ -9,14 +12,29 @@ using LLVMSharp.Interop;
 
 namespace CLILL;
 
-partial class Compiler
+internal sealed class TypeSystem
 {
-    private static Type GetMsilType(LLVMTypeRef typeRef, CompilationContext context)
+    private readonly ConcurrentDictionary<LLVMTypeRef, Type> _structTypes = [];
+    private readonly ConcurrentDictionary<LLVMTypeRef, Type> _arrayTypes = [];
+    private readonly ConcurrentDictionary<(LLVMTypeRef, int), Type> _allocaArrayTypes = [];
+
+    private readonly ConcurrentDictionary<LLVMMetadataRef, ISymbolDocumentWriter> _documents = [];
+
+    private readonly ModuleBuilder _moduleBuilder;
+    private readonly LLVMModuleRef _module;
+
+    public TypeSystem(ModuleBuilder moduleBuilder, LLVMModuleRef module)
+    {
+        _moduleBuilder = moduleBuilder;
+        _module = module;
+    }
+
+    public Type GetMsilType(LLVMTypeRef typeRef)
     {
         switch (typeRef.Kind)
         {
             case LLVMTypeKind.LLVMArrayTypeKind:
-                return context.ArrayTypes.GetOrAdd(typeRef, x => CreateArrayType(x, context));
+                return _arrayTypes.GetOrAdd(typeRef, x => CreateArrayType(x));
 
             case LLVMTypeKind.LLVMDoubleTypeKind:
                 return typeof(double);
@@ -40,10 +58,10 @@ partial class Compiler
                 return typeof(void*);
 
             case LLVMTypeKind.LLVMStructTypeKind:
-                return context.StructTypes.GetOrAdd(typeRef, x => CreateStructType(x, context));
+                return _structTypes.GetOrAdd(typeRef, CreateStructType);
 
             case LLVMTypeKind.LLVMVectorTypeKind:
-                return GetMsilVectorType(typeRef, context);
+                return GetMsilVectorType(typeRef);
 
             case LLVMTypeKind.LLVMVoidTypeKind:
                 return typeof(void);
@@ -53,25 +71,25 @@ partial class Compiler
         }
     }
 
-    private static Type GetMsilVectorType(LLVMTypeRef typeRef, CompilationContext context)
+    public Type GetMsilVectorType(LLVMTypeRef typeRef)
     {
         if (typeRef.Kind != LLVMTypeKind.LLVMVectorTypeKind)
         {
             throw new InvalidOperationException();
         }
 
-        var vectorSize = context.GetSizeOfTypeInBytes(typeRef);
+        var vectorSize = GetSizeOfTypeInBytes(typeRef);
 
         return vectorSize switch
         {
-            2 or 8 or 16 or 32 or 64 => GetGenericVectorType(typeRef, context).MakeGenericType(GetMsilType(typeRef.ElementType, context)),
-            _ => CreateArrayOrVectorType(typeRef.ElementType, context, (int)typeRef.VectorSize),
+            2 or 8 or 16 or 32 or 64 => GetGenericVectorType(typeRef).MakeGenericType(GetMsilType(typeRef.ElementType)),
+            _ => CreateArrayOrVectorType(typeRef.ElementType, (int)typeRef.VectorSize),
         };
     }
 
     private static int AnonymousStructIndex = 0;
 
-    private static Type CreateStructType(LLVMTypeRef typeRef, CompilationContext context)
+    private Type CreateStructType(LLVMTypeRef typeRef)
     {
         if (typeRef.IsOpaqueStruct)
         {
@@ -88,7 +106,7 @@ partial class Compiler
             ? PackingSize.Size1
             : PackingSize.Unspecified;
 
-        var structType = context.ModuleBuilder.DefineType(
+        var structType = _moduleBuilder.DefineType(
             structName,
             TypeAttributes.Public | TypeAttributes.SequentialLayout,
             typeof(ValueType),
@@ -99,7 +117,7 @@ partial class Compiler
             var structElementTypeRef = typeRef.StructElementTypes[i];
             structType.DefineField(
                 $"Field{i}",
-                GetMsilType(structElementTypeRef, context),
+                GetMsilType(structElementTypeRef),
                 FieldAttributes.Public);
         }
 
@@ -115,29 +133,26 @@ partial class Compiler
         return builtType;
     }
 
-    private static Type GetAllocaArrayType(LLVMTypeRef elementType, int arrayLength, CompilationContext context)
+    public Type GetAllocaArrayType(LLVMTypeRef elementType, int arrayLength)
     {
-        return context.AllocaArrayTypes.GetOrAdd((elementType, arrayLength), _ => CreateArrayOrVectorType(elementType, context, arrayLength));
+        return _allocaArrayTypes.GetOrAdd((elementType, arrayLength), _ => CreateArrayOrVectorType(elementType, arrayLength));
     }
 
-    private static Type CreateArrayType(LLVMTypeRef arrayTypeRef, CompilationContext context)
+    private Type CreateArrayType(LLVMTypeRef arrayTypeRef)
     {
-        return CreateArrayOrVectorType(arrayTypeRef.ElementType, context, (int)arrayTypeRef.ArrayLength);
+        return CreateArrayOrVectorType(arrayTypeRef.ElementType, (int)arrayTypeRef.ArrayLength);
     }
 
-    private static Type CreateArrayOrVectorType(
-        LLVMTypeRef elementTypeRef,
-        CompilationContext context,
-        int length)
+    private Type CreateArrayOrVectorType(LLVMTypeRef elementTypeRef, int length)
     {
-        var elementType = GetMsilType(elementTypeRef, context);
+        var elementType = GetMsilType(elementTypeRef);
 
         if (elementType.IsPointer)
         {
             elementType = typeof(IntPtr);
         }
 
-        var structType = context.ModuleBuilder.DefineType(
+        var structType = _moduleBuilder.DefineType(
             $"Array_{elementType.Name}_{length}",
             TypeAttributes.Public | TypeAttributes.SequentialLayout,
             typeof(ValueType));
@@ -147,7 +162,7 @@ partial class Compiler
         // This will still have the correct size / alignment.
         if (length > 0)
         {
-            var customAttributeBuilder = new System.Reflection.Emit.CustomAttributeBuilder(
+            var customAttributeBuilder = new CustomAttributeBuilder(
                 typeof(InlineArrayAttribute).GetConstructorStrict([typeof(int)]),
                 [length]);
 
@@ -184,9 +199,9 @@ partial class Compiler
         return structType.CreateType();
     }
 
-    private static Type GetNonGenericVectorType(LLVMTypeRef vectorType, CompilationContext context)
+    public Type GetNonGenericVectorType(LLVMTypeRef vectorType)
     {
-        var vectorSizeInBits = vectorType.VectorSize * RoundUpToTypeSize(context.GetSizeOfTypeInBits(vectorType.ElementType));
+        var vectorSizeInBits = vectorType.VectorSize * RoundUpToTypeSize(GetSizeOfTypeInBits(vectorType.ElementType));
         if (vectorSizeInBits > MaxVectorSize)
         {
             throw new NotImplementedException();
@@ -204,9 +219,9 @@ partial class Compiler
         };
     }
 
-    private static Type GetGenericVectorType(LLVMTypeRef vectorType, CompilationContext context)
+    public Type GetGenericVectorType(LLVMTypeRef vectorType)
     {
-        var vectorSizeInBits = vectorType.VectorSize * RoundUpToTypeSize(context.GetSizeOfTypeInBits(vectorType.ElementType));
+        var vectorSizeInBits = vectorType.VectorSize * RoundUpToTypeSize(GetSizeOfTypeInBits(vectorType.ElementType));
         if (vectorSizeInBits > MaxVectorSize)
         {
             throw new NotImplementedException();
@@ -259,5 +274,61 @@ partial class Compiler
         {
             return 8;
         }
+    }
+
+    public unsafe int GetSizeOfTypeInBits(LLVMTypeRef type) => (int)LLVM.SizeOfTypeInBits(
+        LLVM.GetModuleDataLayout(_module), type);
+
+    public unsafe int GetSizeOfTypeInBytes(LLVMTypeRef type) => GetSizeOfTypeInBits(type) / 8;
+
+    public unsafe int GetStructFieldOffset(LLVMTypeRef structType, uint fieldIndex)
+    {
+        var targetData = LLVM.CreateTargetData(LLVM.GetDataLayout(_module));
+
+        var fieldOffset = LLVM.OffsetOfElement(
+            targetData,
+            structType,
+            fieldIndex);
+
+        LLVM.DisposeTargetData(targetData);
+
+        return (int)fieldOffset;
+    }
+
+    public unsafe ISymbolDocumentWriter GetDocument(LLVMMetadataRef diFile)
+    {
+        return _documents.GetOrAdd(diFile, _ =>
+        {
+            var directory = diFile.GetDIFileDirectory();
+            var filename = diFile.GetDIFileFilename();
+
+            var fullPath = Path.Combine(directory, filename);
+
+            var diFileValue = (LLVMValueRef)LLVM.MetadataAsValue(_module.Context, diFile);
+
+            var checksum = diFileValue.GetOperand(2).GetMDString(out var _);
+
+            var language = Path.GetExtension(filename) switch
+            {
+                ".c" or ".h" => SymLanguageType.C,
+                ".cpp" => SymLanguageType.CPlusPlus,
+                ".cs" => SymLanguageType.CSharp,
+                _ => Guid.Empty,
+            };
+
+            var result = _moduleBuilder.DefineDocument(fullPath, language);
+
+            var checksumBytes = Convert.FromHexString(checksum);
+
+            // I can't find a way to get the checksumKind using the LLVM C API.
+            // So we assume it's CSK_MD5 for now.
+            var checksumAlgorithm = new Guid("406EA660-64CF-4C82-B6F0-42D48172A799");
+
+            // TODO: Uncomment when this issue is fixed:
+            // https://github.com/dotnet/runtime/issues/110096
+            //result.SetCheckSum(checksumAlgorithm, checksumBytes);
+
+            return result;
+        });
     }
 }

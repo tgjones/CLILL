@@ -28,6 +28,35 @@ internal static partial class LLVMExtensions
         }
     }
 
+    public static string? GetParameterName(this LLVMValueRef function, int parameterIndex)
+    {
+        foreach (var basicBlock in function.BasicBlocks)
+        {
+            foreach (var instruction in basicBlock.GetInstructions())
+            {
+                if (instruction.InstructionOpcode == LLVMOpcode.LLVMCall)
+                {
+                    var operands = instruction.GetOperands().ToList();
+
+                    switch (operands[^1].Name)
+                    {
+                        case "llvm.dbg.declare":
+                        case "llvm.dbg.value":
+                            var diLocalVariable = instruction.GetOperand(1);
+                            var diLocalVariableArg = diLocalVariable.GetDILocalVariableArg();
+                            if (diLocalVariableArg == parameterIndex)
+                            {
+                                return diLocalVariable.GetDILocalVariableName();
+                            }
+                            break;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
     public static unsafe IEnumerable<LLVMValueRef> GetUses(this LLVMValueRef instruction)
     {
         if (instruction.Kind != LLVMValueKind.LLVMInstructionValueKind)
