@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.Reflection.Emit;
+using CLILL.Helpers;
 
 namespace CLILL.ILEmission;
 
@@ -19,7 +21,7 @@ internal sealed class EntryPointILEmitter(CompiledModule compiledModule, ILGener
         // 
         // return main(args.Length, argv);
 
-        //ILGenerator.Emit(OpCodes.Call, typeof(Debugger).GetMethod(nameof(Debugger.Launch)));
+        //ILGenerator.Emit(OpCodes.Call, typeof(Debugger).GetMethodStrict(nameof(Debugger.Launch)));
         //ILGenerator.Emit(OpCodes.Pop);
 
         var entryPointMethod = entryPoint.MethodInfo;

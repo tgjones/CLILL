@@ -7,13 +7,16 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Text;
 using CLILL.Helpers;
+using CLILL.Intrinsics;
 using CLILL.Runtime;
 using LLVMSharp.Interop;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace CLILL.ILEmission;
 
 internal sealed class FunctionILEmitter : ILEmitter
 {
+    private readonly MethodInfo _method;
     private readonly LLVMValueRef _function;
 
     private readonly Dictionary<LLVMValueRef, bool> CanPushToStackLookup = [];
@@ -31,6 +34,7 @@ internal sealed class FunctionILEmitter : ILEmitter
         CompiledFunctionDefinition compiledFunction)
         : base(compiledModule, compiledFunction.MethodBuilder.GetILGenerator())
     {
+        _method = compiledFunction.MethodBuilder;
         _function = compiledFunction.Function;
 
         // Figure out which instructions need their results stored in local variables,
@@ -429,7 +433,7 @@ internal sealed class FunctionILEmitter : ILEmitter
         var vectorType = instruction.GetOperand(0).TypeOf;
         var getElementMethod = TypeSystem.GetNonGenericVectorType(vectorType)
             .GetMethodStrict(nameof(Vector128.GetElement))
-            .MakeGenericMethod(TypeSystem.GetMsilType(vectorType.ElementType));
+            .MakeGenericMethod(TypeSystem.GetMsilVectorElementType(vectorType.ElementType));
         ILGenerator.Emit(OpCodes.Call, getElementMethod);
     }
 
@@ -444,7 +448,7 @@ internal sealed class FunctionILEmitter : ILEmitter
             case LLVMValueKind.LLVMConstantIntValueKind:
                 var allocatedType = instruction.GetAllocatedType();
                 var localType = numElements.ConstIntSExt != 1
-                    ? TypeSystem.GetAllocaArrayType(allocatedType, (int)numElements.ConstIntSExt)
+                    ? TypeSystem.GetArrayType(allocatedType, (int)numElements.ConstIntSExt)
                     : TypeSystem.GetMsilType(allocatedType);
                 var local = ILGenerator.DeclareLocal(localType);
                 Locals.Add(instruction, local);
@@ -750,7 +754,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                     _ => throw new NotImplementedException($"Integer comparison predicate {instruction.ICmpPredicate} not implemented for vectors: {instruction}"),
                 };
                 var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorComparisonMethodName);
-                var elementType = TypeSystem.GetMsilType(operand0.TypeOf.ElementType);
+                var elementType = TypeSystem.GetMsilVectorElementType(operand0.TypeOf.ElementType);
                 var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
                 ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
                 break;
@@ -824,7 +828,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                     _ => throw new NotImplementedException($"Float comparison predicate {instruction.FCmpPredicate} not implemented for vectors: {instruction}"),
                 };
                 var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorComparisonMethodName);
-                var elementType = TypeSystem.GetMsilType(operand0.TypeOf.ElementType);
+                var elementType = TypeSystem.GetMsilVectorElementType(operand0.TypeOf.ElementType);
                 var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
                 ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
                 break;
@@ -1068,7 +1072,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                     default:
                         var genericVectorType = TypeSystem.GetGenericVectorType(instruction.TypeOf).MakeGenericType(Type.MakeGenericMethodParameter(0));
                         var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorMethodName, Enumerable.Repeat(genericVectorType, operandCount).ToArray()); ;
-                        var elementType = TypeSystem.GetMsilType(instruction.TypeOf.ElementType);
+                        var elementType = TypeSystem.GetMsilVectorElementType(instruction.TypeOf.ElementType);
                         vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
                         break;
                 }
@@ -1196,54 +1200,35 @@ internal sealed class FunctionILEmitter : ILEmitter
 
     private unsafe void EmitCall(LLVMValueRef instruction)
     {
-        var operands = instruction.GetOperands().ToList();
+        var operands = instruction.GetOperands().ToArray();
 
-        switch (operands[^1].Name)
+        var functionToCall = operands[^1];
+
+        if (instruction.IsAIntrinsicInst != null)
         {
-            case "llvm.dbg.declare":
-                HandleDebugDeclare(instruction);
+            var functionName = functionToCall.Name;
+            if (IntrinsicFunctions.LLVMIntrinsics.TryGetValue(functionName, out var intrinsic))
+            {
+                var callContext = new IntrinsicFunctionCallContext(
+                    _method,
+                    Locals,
+                    ILGenerator,
+                    operands,
+                    EmitValue);
+                intrinsic.BuildCall(callContext);
                 return;
-
-            case "llvm.dbg.label":
-                // No-op.
-                return;
-
-            case "llvm.dbg.value":
-                // TODO
-                return;
-
-            case "llvm.experimental.noalias.scope.decl":
-                // No-op.
-                return;
-
-            case "llvm.lifetime.start.p0":
-            case "llvm.lifetime.end.p0":
-                // No-op.
-                return;
-
-            case "llvm.va_start":
-                EmitValue(operands[0]);
-                ILGenerator.Emit(OpCodes.Arglist);
-                ILGenerator.Emit(OpCodes.Conv_U);
-
-                // This is rather specific to the layout used by CoreCLR for varargs.
-                // The actual args are stored at an offset of 8 bytes + (8 * <NumberOfFixedParams>)
-                // from the arglist pointer.
-                long argsOffset = 8 + 8 * Parameters.Count;
-                ILGenerator.Emit(OpCodes.Ldc_I8, argsOffset);
-                ILGenerator.Emit(OpCodes.Conv_U);
-
-                ILGenerator.Emit(OpCodes.Add);
-                ILGenerator.Emit(OpCodes.Stind_I);
-                return;
+            }
+            else
+            {
+                throw new NotImplementedException($"Unknown LLVM intrinsic: {functionName}");
+            }
         }
+        
 
-        for (var i = 0; i < operands.Count - 1; i++)
+        for (var i = 0; i < operands.Length - 1; i++)
         {
             EmitValue(operands[i]);
         }
-
-        var functionToCall = operands[^1];
 
         var functionType = (LLVMTypeRef)LLVM.GetCalledFunctionType(instruction);
 
@@ -1252,7 +1237,7 @@ internal sealed class FunctionILEmitter : ILEmitter
         if (isVarArg)
         {
             var parameters = functionType.ParamTypes;
-            varArgsParameterTypes = new Type[operands.Count - 1 - parameters.Length];
+            varArgsParameterTypes = new Type[operands.Length - 1 - parameters.Length];
             for (var i = 0; i < varArgsParameterTypes.Length; i++)
             {
                 varArgsParameterTypes[i] = TypeSystem.GetMsilType(operands[i + parameters.Length].TypeOf);
@@ -1495,7 +1480,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                 EmitValue(operand1);
                 EmitValue(instruction.GetOperand(2));
 
-                var elementType = TypeSystem.GetMsilType(operand1.TypeOf.ElementType);
+                var elementType = TypeSystem.GetMsilVectorElementType(operand1.TypeOf.ElementType);
                 var conditionalSelectMethod = TypeSystem.GetNonGenericVectorType(operand1.TypeOf)
                     .GetMethodStrict(nameof(Vector128.ConditionalSelect))
                     .MakeGenericMethod(elementType);

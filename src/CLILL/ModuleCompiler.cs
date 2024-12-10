@@ -7,7 +7,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using CLILL.Helpers;
 using CLILL.ILEmission;
-using CLILL.Runtime;
 using LLVMSharp.Interop;
 
 namespace CLILL;
@@ -115,17 +114,10 @@ internal sealed class ModuleCompiler : IDisposable
         var function = _module.FirstFunction;
         while (function.Handle != IntPtr.Zero)
         {
-            switch (function.Name)
+            if (function.IntrinsicID != 0)
             {
-                case "llvm.dbg.declare":
-                case "llvm.dbg.label":
-                case "llvm.dbg.value":
-                case "llvm.experimental.noalias.scope.decl":
-                case "llvm.lifetime.start.p0":
-                case "llvm.lifetime.end.p0":
-                case "llvm.va_start":
-                    function = function.NextFunction;
-                    continue;
+                function = function.NextFunction;
+                continue;
             }
 
             var compiledFunction = CompileFunction(function);
@@ -157,58 +149,16 @@ internal sealed class ModuleCompiler : IDisposable
 
     private unsafe MethodInfo CreateMethodDeclaration(LLVMValueRef function)
     {
-        switch (function.Name)
-        {
-            case var _ when function.Name.StartsWith("llvm."):
-                return CreateLlvmIntrinsicMethod(function);
+        // TODO: We assume all extern function are part of C runtime.
+        // That isn't generally true...
 
-            default:
-                // TODO: We assume all extern function are part of C runtime.
-                // That isn't generally true...
+        var functionType = (LLVMTypeRef)LLVM.GlobalGetValueType(function);
 
-                var functionType = (LLVMTypeRef)LLVM.GlobalGetValueType(function);
-
-                return CreateExternMethod(
-                    function.Name,
-                    functionType.IsFunctionVarArg ? CallingConventions.VarArgs : CallingConventions.Standard,
-                    _typeSystem.GetMsilType(functionType.ReturnType),
-                    functionType.ParamTypes.Select(x => _typeSystem.GetMsilType(x)).ToArray());
-        }
-    }
-
-    private static MethodInfo CreateLlvmIntrinsicMethod(LLVMValueRef function)
-    {
-        var methodName = function.Name switch
-        {
-            "llvm.assume" => nameof(LLVMIntrinsics.Assume),
-            "llvm.copysign.f32" => nameof(LLVMIntrinsics.CopySignF32),
-            "llvm.copysign.f64" => nameof(LLVMIntrinsics.CopySignF64),
-            "llvm.fabs.f32" => nameof(LLVMIntrinsics.FAbsF32),
-            "llvm.fabs.f64" => nameof(LLVMIntrinsics.FAbsF64),
-            "llvm.fmuladd.f32" => nameof(LLVMIntrinsics.FMulAddF32),
-            "llvm.fmuladd.f64" => nameof(LLVMIntrinsics.FMulAddF64),
-            "llvm.fmuladd.v2f32" => nameof(LLVMIntrinsics.FMulAddV2F32),
-            "llvm.fmuladd.v2f64" => nameof(LLVMIntrinsics.FMulAddV2F64),
-            "llvm.fmuladd.v4f32" => nameof(LLVMIntrinsics.FMulAddV4F32),
-            "llvm.fmuladd.v4f64" => nameof(LLVMIntrinsics.FMulAddV4F64),
-            "llvm.lifetime.end.p0" => nameof(LLVMIntrinsics.LifetimeEndP0),
-            "llvm.lifetime.start.p0" => nameof(LLVMIntrinsics.LifetimeStartP0),
-            "llvm.memcpy.p0.p0.i64" => nameof(LLVMIntrinsics.MemCpyI64),
-            "llvm.memset.p0.i64" => nameof(LLVMIntrinsics.MemSetI64),
-            "llvm.smax.i32" => nameof(LLVMIntrinsics.SMaxI32),
-            "llvm.smax.v4i32" => nameof(LLVMIntrinsics.SMaxV4I32),
-            "llvm.sqrt.f32" => nameof(LLVMIntrinsics.SqrtF32),
-            "llvm.sqrt.f64" => nameof(LLVMIntrinsics.SqrtF64),
-            "llvm.stackrestore" or "llvm.stackrestore.p0" => nameof(LLVMIntrinsics.StackRestore),
-            "llvm.stacksave" or "llvm.stacksave.p0" => nameof(LLVMIntrinsics.StackSave),
-            "llvm.usub.sat.i32" => nameof(LLVMIntrinsics.USubSatI32),
-            "llvm.vector.reduce.add.v4i32" => nameof(LLVMIntrinsics.VectorReduceAddV4I32),
-            "llvm.vector.reduce.mul.v4i32" => nameof(LLVMIntrinsics.VectorReduceMulV4I32),
-            "llvm.vector.reduce.smax.v4i32" => nameof(LLVMIntrinsics.VectorReduceSMaxV4I32),
-            _ => throw new NotImplementedException($"Unknown LLVM intrinsic: {function.Name}"),
-        };
-
-        return typeof(LLVMIntrinsics).GetMethodStrict(methodName);
+        return CreateExternMethod(
+            function.Name,
+            functionType.IsFunctionVarArg ? CallingConventions.VarArgs : CallingConventions.Standard,
+            _typeSystem.GetMsilType(functionType.ReturnType),
+            functionType.ParamTypes.Select(x => _typeSystem.GetMsilType(x)).ToArray());
     }
 
     private unsafe MethodBuilder CompileMethod(LLVMValueRef function)

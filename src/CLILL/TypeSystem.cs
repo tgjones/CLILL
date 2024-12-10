@@ -15,8 +15,7 @@ namespace CLILL;
 internal sealed class TypeSystem
 {
     private readonly ConcurrentDictionary<LLVMTypeRef, Type> _structTypes = [];
-    private readonly ConcurrentDictionary<LLVMTypeRef, Type> _arrayTypes = [];
-    private readonly ConcurrentDictionary<(LLVMTypeRef, int), Type> _allocaArrayTypes = [];
+    private readonly ConcurrentDictionary<(LLVMTypeRef, int), Type> _arrayTypes = [];
 
     private readonly ConcurrentDictionary<LLVMMetadataRef, ISymbolDocumentWriter> _documents = [];
 
@@ -34,7 +33,7 @@ internal sealed class TypeSystem
         switch (typeRef.Kind)
         {
             case LLVMTypeKind.LLVMArrayTypeKind:
-                return _arrayTypes.GetOrAdd(typeRef, x => CreateArrayType(x));
+                return GetArrayType(typeRef.ElementType, (int)typeRef.ArrayLength);
 
             case LLVMTypeKind.LLVMDoubleTypeKind:
                 return typeof(double);
@@ -82,9 +81,21 @@ internal sealed class TypeSystem
 
         return vectorSize switch
         {
-            2 or 8 or 16 or 32 or 64 => GetGenericVectorType(typeRef).MakeGenericType(GetMsilType(typeRef.ElementType)),
-            _ => CreateArrayOrVectorType(typeRef.ElementType, (int)typeRef.VectorSize),
+            2 or 8 or 16 or 32 or 64 => GetGenericVectorType(typeRef).MakeGenericType(GetMsilVectorElementType(typeRef.ElementType)),
+            _ => GetArrayType(typeRef.ElementType, (int)typeRef.VectorSize),
         };
+    }
+
+    public Type GetMsilVectorElementType(LLVMTypeRef elementTypeRef)
+    {
+        var result = GetMsilType(elementTypeRef);
+
+        if (result == typeof(bool))
+        {
+            result = typeof(byte);
+        }
+
+        return result;
     }
 
     private static int AnonymousStructIndex = 0;
@@ -133,17 +144,12 @@ internal sealed class TypeSystem
         return builtType;
     }
 
-    public Type GetAllocaArrayType(LLVMTypeRef elementType, int arrayLength)
+    public Type GetArrayType(LLVMTypeRef elementType, int arrayLength)
     {
-        return _allocaArrayTypes.GetOrAdd((elementType, arrayLength), _ => CreateArrayOrVectorType(elementType, arrayLength));
+        return _arrayTypes.GetOrAdd((elementType, arrayLength), _ => CreateArrayType(elementType, arrayLength));
     }
 
-    private Type CreateArrayType(LLVMTypeRef arrayTypeRef)
-    {
-        return CreateArrayOrVectorType(arrayTypeRef.ElementType, (int)arrayTypeRef.ArrayLength);
-    }
-
-    private Type CreateArrayOrVectorType(LLVMTypeRef elementTypeRef, int length)
+    private Type CreateArrayType(LLVMTypeRef elementTypeRef, int length)
     {
         var elementType = GetMsilType(elementTypeRef);
 
