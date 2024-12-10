@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "IR2IL": {
+      "commandName": "Project",
+      "commandLineArgs": "",
+      "nativeDebugging": true
+    }
+  }
+}

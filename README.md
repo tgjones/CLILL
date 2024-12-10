@@ -1,3 +1,3 @@
-# CLILL
+# IR2IL
 
-CLILL is a proof-of-concept LLVM IR to MSIL translator.
+IR2IL is a proof-of-concept LLVM IR to MSIL translator.
