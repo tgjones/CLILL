@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 
 namespace IR2IL.Runtime;
 
@@ -9,4 +9,6 @@ public readonly struct Vector16<T>
     public static unsafe int Count => Vector16.Size / sizeof(T);
 
     public static Vector16<T> Zero => default;
+
+    public T this[int index] => this.GetElementUnsafe(index);
 }

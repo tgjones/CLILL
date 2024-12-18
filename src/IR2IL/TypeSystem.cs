@@ -42,16 +42,7 @@ internal sealed class TypeSystem
                 return typeof(float);
 
             case LLVMTypeKind.LLVMIntegerTypeKind:
-                var intTypeWidth = typeRef.IntWidth;
-                return intTypeWidth switch
-                {
-                    1 => typeof(bool),
-                    32 => typeof(int),
-                    8 => typeof(byte),
-                    16 => typeof(short),
-                    64 => typeof(long),
-                    _ => throw new NotImplementedException($"Integer width {intTypeWidth} not implemented: {typeRef}"),
-                };
+                return GetIntegerType((int)typeRef.IntWidth);
 
             case LLVMTypeKind.LLVMPointerTypeKind:
                 return typeof(void*);
@@ -70,6 +61,16 @@ internal sealed class TypeSystem
         }
     }
 
+    public Type GetIntegerType(int intTypeWidth) => intTypeWidth switch
+    {
+        1 => typeof(bool),
+        32 => typeof(int),
+        8 => typeof(byte),
+        16 => typeof(short),
+        64 => typeof(long),
+        _ => throw new NotImplementedException($"Integer width {intTypeWidth} not implemented"),
+    };
+
     public Type GetMsilVectorType(LLVMTypeRef typeRef)
     {
         if (typeRef.Kind != LLVMTypeKind.LLVMVectorTypeKind)
@@ -77,12 +78,21 @@ internal sealed class TypeSystem
             throw new InvalidOperationException();
         }
 
-        var vectorSize = GetSizeOfTypeInBytes(typeRef);
+        return GetMsilVectorType(typeRef.ElementType, (int)typeRef.VectorSize);
+    }
 
-        return vectorSize switch
+    public Type GetMsilVectorType(LLVMTypeRef elementTypeRef, int vectorSize)
+    {
+        var vectorSizeInBits = vectorSize * RoundUpToTypeSize(GetSizeOfTypeInBits(elementTypeRef));
+        if (vectorSizeInBits > MaxVectorSize)
         {
-            2 or 8 or 16 or 32 or 64 => GetGenericVectorType(typeRef).MakeGenericType(GetMsilVectorElementType(typeRef.ElementType)),
-            _ => GetArrayType(typeRef.ElementType, (int)typeRef.VectorSize),
+            throw new NotImplementedException();
+        }
+
+        return vectorSizeInBits switch
+        {
+            16 or 32 or 64 or 128 or 256 or 512 or 1024 => GetGenericVectorType(elementTypeRef, vectorSize).MakeGenericType(GetMsilVectorElementType(elementTypeRef)),
+            _ => GetArrayType(elementTypeRef, vectorSize),
         };
     }
 
@@ -92,7 +102,7 @@ internal sealed class TypeSystem
 
         if (result == typeof(bool))
         {
-            result = typeof(byte);
+            result = typeof(sbyte);
         }
 
         return result;
@@ -221,13 +231,16 @@ internal sealed class TypeSystem
             128 => typeof(Vector128),
             256 => typeof(Vector256),
             512 => typeof(Vector512),
+            1024 => typeof(Vector1024),
             _ => throw new NotImplementedException($"Vector size {vectorSizeInBits} not implemented: {vectorType}")
         };
     }
 
-    public Type GetGenericVectorType(LLVMTypeRef vectorType)
+    public Type GetGenericVectorType(LLVMTypeRef vectorType) => GetGenericVectorType(vectorType.ElementType, (int)vectorType.VectorSize);
+
+    public Type GetGenericVectorType(LLVMTypeRef vectorElementType, int vectorSize)
     {
-        var vectorSizeInBits = vectorType.VectorSize * RoundUpToTypeSize(GetSizeOfTypeInBits(vectorType.ElementType));
+        var vectorSizeInBits = vectorSize * RoundUpToTypeSize(GetSizeOfTypeInBits(vectorElementType));
         if (vectorSizeInBits > MaxVectorSize)
         {
             throw new NotImplementedException();
@@ -236,21 +249,27 @@ internal sealed class TypeSystem
         return vectorSizeInBits switch
         {
             16 => typeof(Vector16<>),
+            32 => typeof(Vector32<>),
             64 => typeof(Vector64<>),
             128 => typeof(Vector128<>),
             256 => typeof(Vector256<>),
             512 => typeof(Vector512<>),
-            _ => throw new NotImplementedException($"Vector size {vectorSizeInBits} not implemented: {vectorType}")
+            1024 => typeof(Vector1024<>),
+            _ => throw new NotImplementedException($"Vector size {vectorSizeInBits} not implemented for element type: {vectorElementType}")
         };
     }
 
-    private const int MaxVectorSize = 512;
+    private const int MaxVectorSize = 1024;
 
     private static int RoundUpToTypeSize(int sizeInBits)
     {
-        if (sizeInBits > 512)
+        if (sizeInBits > 1024)
         {
             throw new NotImplementedException();
+        }
+        else if (sizeInBits > 512)
+        {
+            return 1024;
         }
         else if (sizeInBits > 256)
         {

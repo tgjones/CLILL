@@ -7,7 +7,7 @@ namespace IR2IL.Intrinsics;
 
 internal sealed class LLVMMemCpyI64IntrinsicFunction : IntrinsicFunction
 {
-    private static readonly MethodInfo Method = typeof(NativeMemory).GetMethodStrict(nameof(NativeMemory.Copy));
+    private static readonly MethodInfo Method = typeof(NativeMemory).GetStaticMethodStrict(nameof(NativeMemory.Copy));
 
     public override void BuildCall(IntrinsicFunctionCallContext context)
     {

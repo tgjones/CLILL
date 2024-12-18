@@ -10,7 +10,6 @@ using IR2IL.Helpers;
 using IR2IL.Intrinsics;
 using IR2IL.Runtime;
 using LLVMSharp.Interop;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace IR2IL.ILEmission;
 
@@ -410,7 +409,7 @@ internal sealed class FunctionILEmitter : ILEmitter
             case LLVMTypeKind.LLVMIntegerTypeKind:
             case LLVMTypeKind.LLVMFloatTypeKind:
             case LLVMTypeKind.LLVMDoubleTypeKind:
-                var bitCastMethod = typeof(Unsafe).GetMethodStrict(nameof(Unsafe.BitCast)).MakeGenericMethod(
+                var bitCastMethod = typeof(Unsafe).GetStaticMethodStrict(nameof(Unsafe.BitCast)).MakeGenericMethod(
                     TypeSystem.GetMsilType(fromType),
                     TypeSystem.GetMsilType(toType));
                 ILGenerator.Emit(OpCodes.Call, bitCastMethod);
@@ -432,7 +431,7 @@ internal sealed class FunctionILEmitter : ILEmitter
 
         var vectorType = instruction.GetOperand(0).TypeOf;
         var getElementMethod = TypeSystem.GetNonGenericVectorType(vectorType)
-            .GetMethodStrict(nameof(Vector128.GetElement))
+            .GetStaticMethodStrict(nameof(Vector128.GetElement))
             .MakeGenericMethod(TypeSystem.GetMsilVectorElementType(vectorType.ElementType));
         ILGenerator.Emit(OpCodes.Call, getElementMethod);
     }
@@ -678,9 +677,16 @@ internal sealed class FunctionILEmitter : ILEmitter
         var valueOperand = instruction.GetOperand(1);
         EmitValue(valueOperand);
 
-        var withElementMethod = TypeSystem.GetNonGenericVectorType(vectorOperand.TypeOf)
-            .GetMethodStrict(nameof(Vector128.WithElement))
-            .MakeGenericMethod(TypeSystem.GetMsilType(valueOperand.TypeOf));
+        EmitVectorWithElement(
+            TypeSystem.GetNonGenericVectorType(vectorOperand.TypeOf),
+            TypeSystem.GetMsilType(valueOperand.TypeOf));
+    }
+
+    private void EmitVectorWithElement(Type nonGenericVectorType, Type valueType)
+    {
+        var withElementMethod = nonGenericVectorType
+            .GetStaticMethodStrict(nameof(Vector128.WithElement))
+            .MakeGenericMethod(valueType);
         ILGenerator.Emit(OpCodes.Call, withElementMethod);
     }
 
@@ -741,8 +747,6 @@ internal sealed class FunctionILEmitter : ILEmitter
                 break;
 
             case LLVMTypeKind.LLVMVectorTypeKind:
-                var nonGenericVectorType = TypeSystem.GetNonGenericVectorType(operand0.TypeOf);
-                var genericVectorType = TypeSystem.GetGenericVectorType(operand0.TypeOf).MakeGenericType(Type.MakeGenericMethodParameter(0));
                 var vectorComparisonMethodName = instruction.ICmpPredicate switch
                 {
                     LLVMIntPredicate.LLVMIntEQ => nameof(Vector128.Equals),
@@ -753,14 +757,68 @@ internal sealed class FunctionILEmitter : ILEmitter
                     LLVMIntPredicate.LLVMIntULT => nameof(Vector128.LessThan),
                     _ => throw new NotImplementedException($"Integer comparison predicate {instruction.ICmpPredicate} not implemented for vectors: {instruction}"),
                 };
-                var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorComparisonMethodName);
-                var elementType = TypeSystem.GetMsilVectorElementType(operand0.TypeOf.ElementType);
-                var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
-                ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
+                EmitVectorComparison(instruction, vectorComparisonMethodName);
                 break;
 
             default:
-                throw new NotImplementedException($"FCmp not implemented for type {operand0.TypeOf.Kind}: {instruction}");
+                throw new NotImplementedException($"ICmp not implemented for type {operand0.TypeOf.Kind}: {instruction}");
+        }
+    }
+
+    private void EmitVectorComparison(LLVMValueRef instruction, string vectorComparisonMethodName)
+    {
+        var operand0 = instruction.GetOperand(0);
+
+        var nonGenericVectorType = TypeSystem.GetNonGenericVectorType(operand0.TypeOf);
+        var genericVectorMethod = nonGenericVectorType.GetStaticMethodStrict(vectorComparisonMethodName);
+        var elementType = TypeSystem.GetMsilVectorElementType(operand0.TypeOf.ElementType);
+        var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
+        ILGenerator.Emit(OpCodes.Call, vectorMethod);
+
+        // If result is not an integer type, bitcast it to integer type.
+        switch (operand0.TypeOf.ElementType.Kind)
+        {
+            case LLVMTypeKind.LLVMDoubleTypeKind:
+                ILGenerator.Emit(OpCodes.Call, nonGenericVectorType.GetMethodStrict(nameof(Vector128.AsInt64)).MakeGenericMethod(elementType));
+                break;
+
+            case LLVMTypeKind.LLVMFloatTypeKind:
+                ILGenerator.Emit(OpCodes.Call, nonGenericVectorType.GetMethodStrict(nameof(Vector128.AsInt32)).MakeGenericMethod(elementType));
+                break;
+
+            case LLVMTypeKind.LLVMIntegerTypeKind:
+                // Nothing to do.
+                break;
+
+            default:
+                throw new NotImplementedException($"Vector comparison not implemented for element type {operand0.TypeOf.ElementType.Kind}: {instruction}");
+        }
+
+        // Save intermediate result to local, since we'll need to reference it multiple times below.
+        var integerVectorType = TypeSystem.GetGenericVectorType(operand0.TypeOf).MakeGenericType(TypeSystem.GetIntegerType(TypeSystem.GetSizeOfTypeInBits(operand0.TypeOf.ElementType)));
+        var intermediateLocal = ILGenerator.DeclareLocal(integerVectorType);
+        ILGenerator.Emit(OpCodes.Stloc, intermediateLocal);
+
+        // We need to truncate the result from e.g. Vector128<long> to Vector16<sbyte>,
+        // something like this:
+        // Vector16<sbyte>.Zero.WithElement(0, (sbyte)input[0]).WithElement(1, (sbyte)input[1]);
+        var resultVectorType = TypeSystem.GetMsilVectorType(instruction.TypeOf);
+        ILGenerator.Emit(OpCodes.Call, resultVectorType.GetMethodStrict("get_Zero"));
+
+        var inputVectorType = TypeSystem.GetMsilVectorType(operand0.TypeOf);
+        for (var i = 0; i < instruction.TypeOf.VectorSize; i++)
+        {
+            ILGenerator.Emit(OpCodes.Ldc_I4, i);
+            ILGenerator.Emit(OpCodes.Ldloca, intermediateLocal);
+            ILGenerator.Emit(OpCodes.Ldc_I4, i);
+            ILGenerator.Emit(OpCodes.Call, integerVectorType.GetMethodStrict("get_Item"));
+
+            // Cast to `sbyte`.
+            ILGenerator.Emit(OpCodes.Conv_I1);
+
+            EmitVectorWithElement(
+                TypeSystem.GetNonGenericVectorType(instruction.TypeOf),
+                typeof(sbyte));
         }
     }
 
@@ -817,8 +875,6 @@ internal sealed class FunctionILEmitter : ILEmitter
                 break;
 
             case LLVMTypeKind.LLVMVectorTypeKind:
-                var nonGenericVectorType = TypeSystem.GetNonGenericVectorType(operand0.TypeOf);
-                var genericVectorType = TypeSystem.GetGenericVectorType(operand0.TypeOf).MakeGenericType(Type.MakeGenericMethodParameter(0));
                 var vectorComparisonMethodName = instruction.FCmpPredicate switch
                 {
                     LLVMRealPredicate.LLVMRealOEQ => nameof(Vector128.Equals),
@@ -827,10 +883,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                     LLVMRealPredicate.LLVMRealUGE => nameof(Vector128.GreaterThanOrEqual),
                     _ => throw new NotImplementedException($"Float comparison predicate {instruction.FCmpPredicate} not implemented for vectors: {instruction}"),
                 };
-                var genericVectorMethod = nonGenericVectorType.GetMethodStrict(vectorComparisonMethodName);
-                var elementType = TypeSystem.GetMsilVectorElementType(operand0.TypeOf.ElementType);
-                var vectorMethod = genericVectorMethod.MakeGenericMethod(elementType);
-                ILGenerator.EmitCall(OpCodes.Call, vectorMethod, null);
+                EmitVectorComparison(instruction, vectorComparisonMethodName);
                 break;
 
             default:
@@ -948,7 +1001,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                     case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMDoubleTypeKind):
                     case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMFloatTypeKind):
                         var convertMethodName = $"Convert{GetIntrinsicMethodSuffix(operand.TypeOf)}To{GetIntrinsicMethodSuffix(toType)}";
-                        var convertMethod = typeof(VectorUtility).GetMethodStrict(convertMethodName);
+                        var convertMethod = typeof(VectorUtility).GetStaticMethodStrict(convertMethodName);
                         ILGenerator.Emit(OpCodes.Call, convertMethod);
                         break;
 
@@ -1066,7 +1119,7 @@ internal sealed class FunctionILEmitter : ILEmitter
 
                     case "SignedRemainder":
                     case "UnsignedRemainder":
-                        vectorMethod = typeof(VectorUtility).GetMethodStrict($"{vectorMethodName}{GetIntrinsicMethodSuffix(instruction.TypeOf)}");
+                        vectorMethod = typeof(VectorUtility).GetStaticMethodStrict($"{vectorMethodName}{GetIntrinsicMethodSuffix(instruction.TypeOf)}");
                         break;
 
                     default:
@@ -1162,7 +1215,8 @@ internal sealed class FunctionILEmitter : ILEmitter
     private OpCode EmitBranchCondition(LLVMValueRef condition)
     {
         if (CanPushToStack(condition)
-            && condition.InstructionOpcode == LLVMOpcode.LLVMICmp)
+            && condition.InstructionOpcode == LLVMOpcode.LLVMICmp
+            && condition.TypeOf.Kind == LLVMTypeKind.LLVMIntegerTypeKind)
         {
             EmitValue(condition.GetOperand(0));
             EmitValue(condition.GetOperand(1));
@@ -1477,12 +1531,64 @@ internal sealed class FunctionILEmitter : ILEmitter
                 var operand1 = instruction.GetOperand(1);
 
                 EmitValue(operand0);
+
+                // Now we need to convert condition from <2 x i1> to same type as left and right operands.
+
+                // Store to local because we'll need to reference it multiple times below.
+                var intermediateLocal = ILGenerator.DeclareLocal(TypeSystem.GetMsilVectorType(operand0.TypeOf));
+                ILGenerator.Emit(OpCodes.Stloc, intermediateLocal);
+
+                // We need to extend the result from e.g. Vector16<sbyte> to Vector64<int>,
+                // something like this:
+                // Vector64.Create((int)input[0], (int)input[1]);
+
+                var inputVectorType = TypeSystem.GetMsilVectorType(operand0.TypeOf);
+                var operand1ElementSizeInBits = TypeSystem.GetSizeOfTypeInBits(operand1.TypeOf.ElementType);
+                for (var i = 0; i < instruction.TypeOf.VectorSize; i++)
+                {
+                    ILGenerator.Emit(OpCodes.Ldloca, intermediateLocal);
+                    ILGenerator.Emit(OpCodes.Ldc_I4, i);
+                    ILGenerator.Emit(OpCodes.Call, inputVectorType.GetMethodStrict("get_Item"));
+
+                    // If integer bit width is larger than 32, we extend.
+                    if (operand1ElementSizeInBits > 32)
+                    {
+                        ILGenerator.Emit(OpCodes.Conv_I8);
+                    }
+                }
+
+                var nonGenericVectorType = TypeSystem.GetNonGenericVectorType(operand1.TypeOf);
+                var createMethodArgumentTypes = new Type[operand1.TypeOf.VectorSize];
+                // Integer type with same bitwidth as operand1 element type.
+                Array.Fill(createMethodArgumentTypes, TypeSystem.GetIntegerType(operand1ElementSizeInBits));
+                var createMethod = nonGenericVectorType.GetMethodStrict(nameof(Vector128.Create), createMethodArgumentTypes);
+                ILGenerator.Emit(OpCodes.Call, createMethod);
+
+                // If necessary, call cast method, e.g. AsSingle.
+                switch (operand1.TypeOf.ElementType.Kind)
+                {
+                    case LLVMTypeKind.LLVMDoubleTypeKind:
+                        ILGenerator.Emit(OpCodes.Call, nonGenericVectorType.GetMethodStrict(nameof(Vector128.AsDouble)).MakeGenericMethod(createMethodArgumentTypes[0]));
+                        break;
+
+                    case LLVMTypeKind.LLVMFloatTypeKind:
+                        ILGenerator.Emit(OpCodes.Call, nonGenericVectorType.GetMethodStrict(nameof(Vector128.AsSingle)).MakeGenericMethod(createMethodArgumentTypes[0]));
+                        break;
+
+                    case LLVMTypeKind.LLVMIntegerTypeKind:
+                        // Nothing to do.
+                        break;
+
+                    default:
+                        throw new NotImplementedException();
+                }
+
                 EmitValue(operand1);
                 EmitValue(instruction.GetOperand(2));
 
                 var elementType = TypeSystem.GetMsilVectorElementType(operand1.TypeOf.ElementType);
-                var conditionalSelectMethod = TypeSystem.GetNonGenericVectorType(operand1.TypeOf)
-                    .GetMethodStrict(nameof(Vector128.ConditionalSelect))
+                var conditionalSelectMethod = nonGenericVectorType
+                    .GetStaticMethodStrict(nameof(Vector128.ConditionalSelect))
                     .MakeGenericMethod(elementType);
                 ILGenerator.Emit(OpCodes.Call, conditionalSelectMethod);
                 break;

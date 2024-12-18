@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 
@@ -14,6 +14,18 @@ public static class Vector16
         return Vector64.Create(
             (float)vector.GetElementUnsafe(0),
             (float)vector.GetElementUnsafe(1));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static T GetElement<T>(this Vector16<T> vector, int index)
+        where T : unmanaged
+    {
+        if ((uint)index >= (uint)Vector16<T>.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        return vector.GetElementUnsafe(index);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

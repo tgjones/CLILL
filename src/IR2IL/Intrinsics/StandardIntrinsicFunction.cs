@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Reflection;
 using System.Reflection.Emit;
 using IR2IL.Helpers;
@@ -11,12 +11,12 @@ public sealed class StandardIntrinsicFunction(MethodInfo method) : IntrinsicFunc
     {
         return parameterTypes.Length > 0
             ? new StandardIntrinsicFunction(type.GetMethodStrict(methodName, parameterTypes))
-            : new StandardIntrinsicFunction(type.GetMethodStrict(methodName));
+            : new StandardIntrinsicFunction(type.GetStaticMethodStrict(methodName));
     }
 
     public static StandardIntrinsicFunction CreateGeneric(Type type, string methodName, params Type[] typeArguments)
     {
-        return new StandardIntrinsicFunction(type.GetMethodStrict(methodName).MakeGenericMethod(typeArguments));
+        return new StandardIntrinsicFunction(type.GetStaticMethodStrict(methodName).MakeGenericMethod(typeArguments));
     }
 
     public override void BuildCall(IntrinsicFunctionCallContext context)

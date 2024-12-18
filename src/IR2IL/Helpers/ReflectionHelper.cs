@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Reflection;
 
@@ -21,8 +21,13 @@ internal static class ReflectionHelper
         return type.GetMethod(methodName, types) ?? throw new InvalidOperationException($"Method {methodName} with parameters {string.Join(", ", types.Select(x => x.ToString()))} not found in type {type}.");
     }
 
-    public static MethodInfo GetMethodStrict(this Type type, string methodName)
+    public static MethodInfo GetMethodStrict(this Type type, string methodName, BindingFlags bindingFlags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public)
     {
-        return type.GetMethod(methodName) ?? throw new InvalidOperationException($"Method {methodName} not found in type {type}.");
+        return type.GetMethod(methodName, bindingFlags) ?? throw new InvalidOperationException($"Method {methodName} not found in type {type}.");
+    }
+
+    public static MethodInfo GetStaticMethodStrict(this Type type, string methodName)
+    {
+        return type.GetMethodStrict(methodName, BindingFlags.Public | BindingFlags.Static);
     }
 }
