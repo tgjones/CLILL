@@ -901,11 +901,18 @@ internal sealed class FunctionILEmitter : ILEmitter
 
     private void EmitConversion(LLVMValueRef instruction, Signedness signedness)
     {
-        var operand = instruction.GetOperand(0);
+        EmitConversion(
+            instruction.InstructionOpcode,
+            instruction.GetOperand(0),
+            instruction.TypeOf,
+            signedness);
+    }
+
+    private void EmitConversion(LLVMOpcode opcode, LLVMValueRef operand, LLVMTypeRef toType, Signedness signedness)
+    {
         var fromType = operand.TypeOf;
         EmitValue(operand);
 
-        var toType = instruction.TypeOf;
         switch (toType.Kind)
         {
             case LLVMTypeKind.LLVMDoubleTypeKind:
@@ -917,7 +924,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                 break;
 
             case LLVMTypeKind.LLVMIntegerTypeKind:
-                switch (instruction.InstructionOpcode)
+                switch (opcode)
                 {
                     case LLVMOpcode.LLVMSExt:
                         // Ensure source type is treated as signed.
@@ -989,7 +996,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                         break;
 
                     default:
-                        throw new NotImplementedException($"Conversion not implemented to {toType.IntWidth}: {instruction}");
+                        throw new NotImplementedException($"Conversion not implemented to {toType.IntWidth}: {opcode}");
                 }
                 break;
 
@@ -1017,12 +1024,12 @@ internal sealed class FunctionILEmitter : ILEmitter
                         break;
 
                     default:
-                        throw new NotImplementedException($"Conversion not implemented from vector {fromType} to {toType}: {instruction}");
+                        throw new NotImplementedException($"Conversion not implemented from vector {fromType} to {toType}: {opcode}");
                 }
                 break;
 
             default:
-                throw new NotImplementedException($"Conversion not implemented to {toType}: {instruction}");
+                throw new NotImplementedException($"Conversion not implemented to {toType}: {opcode}");
         }
     }
 
@@ -1089,7 +1096,14 @@ internal sealed class FunctionILEmitter : ILEmitter
             }
             else
             {
-                EmitValue(operand);
+                if (i == 0 && instruction.InstructionOpcode == LLVMOpcode.LLVMAShr)
+                {
+                    EmitConversion(LLVMOpcode.LLVMSExt, operand, instruction.TypeOf, Signedness.Signed);
+                }
+                else
+                {
+                    EmitValue(operand);
+                }
             }
         }
 
