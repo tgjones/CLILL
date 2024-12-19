@@ -172,6 +172,7 @@ internal static partial class LLVMExtensions
         {
             case LLVMValueKind.LLVMArgumentValueKind:
             case LLVMValueKind.LLVMConstantDataVectorValueKind:
+            case LLVMValueKind.LLVMConstantFPValueKind:
             case LLVMValueKind.LLVMConstantIntValueKind:
             case LLVMValueKind.LLVMConstantPointerNullValueKind:
             case LLVMValueKind.LLVMPoisonValueValueKind:
