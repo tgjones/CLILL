@@ -149,16 +149,27 @@ internal sealed class ModuleCompiler : IDisposable
 
     private unsafe MethodInfo CreateMethodDeclaration(LLVMValueRef function)
     {
-        // TODO: We assume all extern function are part of C runtime.
-        // That isn't generally true...
+        switch (function.Name)
+        {
+            // TODO: More math library functions.
+            // TODO: Validate parameter types are expected.
+            case "exp10":
+                return typeof(double).GetMethodStrict(nameof(double.Exp10));
+            case "exp10f":
+                return typeof(float).GetMethodStrict(nameof(float.Exp10));
 
-        var functionType = (LLVMTypeRef)LLVM.GlobalGetValueType(function);
+            default:
+                // TODO: We assume all extern function are part of C runtime.
+                // That isn't generally true...
 
-        return CreateExternMethod(
-            function.Name,
-            functionType.IsFunctionVarArg ? CallingConventions.VarArgs : CallingConventions.Standard,
-            _typeSystem.GetMsilType(functionType.ReturnType),
-            functionType.ParamTypes.Select(x => _typeSystem.GetMsilType(x)).ToArray());
+                var functionType = (LLVMTypeRef)LLVM.GlobalGetValueType(function);
+
+                return CreateExternMethod(
+                    function.Name,
+                    functionType.IsFunctionVarArg ? CallingConventions.VarArgs : CallingConventions.Standard,
+                    _typeSystem.GetMsilType(functionType.ReturnType),
+                    functionType.ParamTypes.Select(x => _typeSystem.GetMsilType(x)).ToArray());
+        }
     }
 
     private unsafe MethodBuilder CompileMethod(LLVMValueRef function)
@@ -193,9 +204,13 @@ internal sealed class ModuleCompiler : IDisposable
         Type returnType,
         Type[] parameterTypes)
     {
+        var libraryName = name.StartsWith("omp_") // TODO: Complete hack
+            ? "vcomp140.dll"
+            : "ucrtbase.dll";
+
         var methodInfo = _typeBuilder.DefinePInvokeMethod(
             name,
-            "ucrtbase.dll",
+            libraryName,
             MethodAttributes.Private | MethodAttributes.HideBySig | MethodAttributes.Static,
             callingConventions,
             returnType,

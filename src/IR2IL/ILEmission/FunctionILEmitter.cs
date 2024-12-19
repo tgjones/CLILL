@@ -249,6 +249,10 @@ internal sealed class FunctionILEmitter : ILEmitter
                 EmitExtractElement(instruction);
                 break;
 
+            case LLVMOpcode.LLVMFreeze:
+                EmitFreeze(instruction);
+                break;
+
             case LLVMOpcode.LLVMFCmp:
                 EmitFCmp(instruction);
                 break;
@@ -409,6 +413,7 @@ internal sealed class FunctionILEmitter : ILEmitter
             case LLVMTypeKind.LLVMIntegerTypeKind:
             case LLVMTypeKind.LLVMFloatTypeKind:
             case LLVMTypeKind.LLVMDoubleTypeKind:
+            case LLVMTypeKind.LLVMVectorTypeKind:
                 var bitCastMethod = typeof(Unsafe).GetStaticMethodStrict(nameof(Unsafe.BitCast)).MakeGenericMethod(
                     TypeSystem.GetMsilType(fromType),
                     TypeSystem.GetMsilType(toType));
@@ -416,7 +421,7 @@ internal sealed class FunctionILEmitter : ILEmitter
                 break;
 
             default:
-                throw new InvalidOperationException();
+                throw new InvalidOperationException($"Unsupported bitcast from type {fromType} to type {toType}: {instruction}");
         }
     }
 
@@ -463,6 +468,11 @@ internal sealed class FunctionILEmitter : ILEmitter
             default:
                 throw new NotImplementedException($"Alloca not implemented for kind {numElements.Kind}: {instruction}");
         }
+    }
+
+    private void EmitFreeze(LLVMValueRef instruction)
+    {
+        EmitValue(instruction.GetOperand(0));
     }
 
     private void EmitStore(LLVMValueRef instruction)
@@ -604,63 +614,6 @@ internal sealed class FunctionILEmitter : ILEmitter
 
         // Load the result.
         ILGenerator.Emit(OpCodes.Ldloc, resultLocal);
-
-
-        //var vectorSize = context.CompilationContext.GetSizeOfTypeInBytes(instruction.TypeOf);
-
-        //var elementType = GetMsilType(instruction.TypeOf.ElementType, context.CompilationContext);
-        //var vectorType = GetMsilType(instruction.TypeOf, context.CompilationContext);
-
-        //var singleWidthVectorType = GetNonGenericVectorType(instruction.TypeOf, context.CompilationContext);
-        //var doubleWidthVectorType = GetNonGenericDoubleWidthVectorType(instruction.TypeOf, context.CompilationContext);
-
-        //// Combine input vectors into one double-width vector.
-        //EmitValue(instruction.GetOperand(0), context);
-        //EmitValue(instruction.GetOperand(1), context);
-        //context.ILGenerator.Emit(OpCodes.Call, doubleWidthVectorType.GetMethod("Create", [vectorType, vectorType]));
-
-        //// Indices
-        //foreach (var maskValue in maskIndices)
-        //{
-        //    switch (elementSizeInBytes)
-        //    {
-        //        case 4:
-        //            context.ILGenerator.Emit(OpCodes.Ldc_I4, maskValue);
-        //            break;
-
-        //        case 8:
-        //            context.ILGenerator.Emit(OpCodes.Ldc_I8, (long)maskValue);
-        //            break;
-
-        //        default:
-        //            throw new NotImplementedException();
-        //    }
-        //}
-        //var maskValueType = elementSizeInBytes switch
-        //{
-        //    4 => typeof(int),
-        //    8 => typeof(long),
-        //    _ => throw new NotImplementedException()
-        //};
-        //var maskValueTypes = Enumerable.Repeat(maskValueType, maskIndices.Length).ToArray();
-        //context.ILGenerator.Emit(OpCodes.Call, singleWidthVectorType.GetMethod("Create", maskValueTypes));
-
-        //var toDoubleWidthVectorMethodName = vectorSize switch
-        //{
-        //    8 => nameof(Vector64.ToVector128),
-        //    16 => nameof(Vector128.ToVector256),
-        //    32 => nameof(Vector256.ToVector512),
-        //    _ => throw new NotImplementedException()
-        //};
-
-        //context.ILGenerator.Emit(OpCodes.Call, singleWidthVectorType.GetMethod(toDoubleWidthVectorMethodName).MakeGenericMethod(elementType));
-
-        //// Do the shuffle
-        //var doubleWidthGenericVectorType = GetGenericDoubleWidthVectorType(instruction.TypeOf, context.CompilationContext);
-        //context.ILGenerator.Emit(OpCodes.Call, doubleWidthVectorType.GetMethod("Shuffle", [doubleWidthGenericVectorType.MakeGenericType(elementType), doubleWidthGenericVectorType.MakeGenericType(maskValueType)]));
-
-        //// Extract the result.
-        //context.ILGenerator.Emit(OpCodes.Call, doubleWidthVectorType.GetMethod("GetLower").MakeGenericMethod(elementType));
     }
 
     private void EmitInsertElement(LLVMValueRef instruction)
@@ -849,12 +802,24 @@ internal sealed class FunctionILEmitter : ILEmitter
                         ILGenerator.Emit(OpCodes.Cgt);
                         break;
 
+                    case LLVMRealPredicate.LLVMRealOLE:
+                        ILGenerator.Emit(OpCodes.Cgt);
+                        ILGenerator.Emit(OpCodes.Ldc_I4_0);
+                        ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
                     case LLVMRealPredicate.LLVMRealOLT:
                         ILGenerator.Emit(OpCodes.Clt);
                         break;
 
                     case LLVMRealPredicate.LLVMRealUGE:
                         ILGenerator.Emit(OpCodes.Clt_Un);
+                        ILGenerator.Emit(OpCodes.Ldc_I4_0);
+                        ILGenerator.Emit(OpCodes.Ceq);
+                        break;
+
+                    case LLVMRealPredicate.LLVMRealULE:
+                        ILGenerator.Emit(OpCodes.Cgt_Un);
                         ILGenerator.Emit(OpCodes.Ldc_I4_0);
                         ILGenerator.Emit(OpCodes.Ceq);
                         break;
@@ -1001,31 +966,9 @@ internal sealed class FunctionILEmitter : ILEmitter
                 break;
 
             case LLVMTypeKind.LLVMVectorTypeKind:
-                switch ((fromType.ElementType.Kind, toType.ElementType.Kind))
-                {
-                    case (LLVMTypeKind.LLVMDoubleTypeKind, LLVMTypeKind.LLVMFloatTypeKind):
-                    case (LLVMTypeKind.LLVMFloatTypeKind, LLVMTypeKind.LLVMDoubleTypeKind):
-                    case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMDoubleTypeKind):
-                    case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMFloatTypeKind):
-                        var convertMethodName = $"Convert{GetIntrinsicMethodSuffix(operand.TypeOf)}To{GetIntrinsicMethodSuffix(toType)}";
-                        var convertMethod = typeof(VectorUtility).GetStaticMethodStrict(convertMethodName);
-                        ILGenerator.Emit(OpCodes.Call, convertMethod);
-                        break;
-
-                    case (LLVMTypeKind.LLVMIntegerTypeKind, LLVMTypeKind.LLVMIntegerTypeKind):
-                        if (fromType.ElementType.IntWidth > toType.ElementType.IntWidth)
-                        {
-                            ILGenerator.Emit(OpCodes.Call, typeof(VectorUtility).GetMethodStrict(nameof(VectorUtility.Narrow), [TypeSystem.GetMsilType(operand.TypeOf)]));
-                        }
-                        else
-                        {
-                            throw new NotImplementedException();
-                        }
-                        break;
-
-                    default:
-                        throw new NotImplementedException($"Conversion not implemented from vector {fromType} to {toType}: {opcode}");
-                }
+                var convertMethodName = $"Convert{GetIntrinsicMethodSuffix(fromType)}To{GetIntrinsicMethodSuffix(toType)}";
+                var convertMethod = typeof(VectorUtility).GetStaticMethodStrict(convertMethodName);
+                ILGenerator.Emit(OpCodes.Call, convertMethod);
                 break;
 
             default:
@@ -1261,8 +1204,10 @@ internal sealed class FunctionILEmitter : ILEmitter
                 LLVMRealPredicate.LLVMRealOEQ => OpCodes.Beq,
                 LLVMRealPredicate.LLVMRealOGE => OpCodes.Bge,
                 LLVMRealPredicate.LLVMRealOGT => OpCodes.Bgt,
+                LLVMRealPredicate.LLVMRealOLE => OpCodes.Ble,
                 LLVMRealPredicate.LLVMRealOLT => OpCodes.Blt,
                 LLVMRealPredicate.LLVMRealUGE => OpCodes.Bge_Un,
+                LLVMRealPredicate.LLVMRealULE => OpCodes.Ble_Un,
                 LLVMRealPredicate.LLVMRealULT => OpCodes.Blt_Un,
                 LLVMRealPredicate.LLVMRealUNE => OpCodes.Bne_Un,
                 _ => throw new NotImplementedException($"Branch condition float comparison {condition.FCmpPredicate} not implemented: {condition}"),

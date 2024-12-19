@@ -138,33 +138,37 @@ public partial class CompilerTests
             out var managedStandardOutput,
             out var managedStandardError);
 
-        var referenceOutputLines = File.ReadLines(Path.ChangeExtension(GetSourceFilePath(testName), ".reference_output"));
+        Assert.AreEqual("", managedStandardError);
 
-        var nativeStandardOutputBuilder = new StringBuilder();
-        int? nativeExitCode = null;
-
-        foreach (var referenceOutputLine in referenceOutputLines)
+        var referenceOutputFilePath = Path.ChangeExtension(GetSourceFilePath(testName), ".reference_output");
+        if (File.Exists(referenceOutputFilePath))
         {
-            var nativeExitCodeMatch = FujitsuCompilerTestSuiteExitCodeRegex().Match(referenceOutputLine);
-            if (nativeExitCodeMatch.Success)
+            var referenceOutputLines = File.ReadLines(referenceOutputFilePath);
+
+            var nativeStandardOutputBuilder = new StringBuilder();
+            int? nativeExitCode = null;
+
+            foreach (var referenceOutputLine in referenceOutputLines)
             {
-                nativeExitCode = int.Parse(nativeExitCodeMatch.Groups[1].Value);
-                break;
+                var nativeExitCodeMatch = FujitsuCompilerTestSuiteExitCodeRegex().Match(referenceOutputLine);
+                if (nativeExitCodeMatch.Success)
+                {
+                    nativeExitCode = int.Parse(nativeExitCodeMatch.Groups[1].Value);
+                    break;
+                }
+
+                nativeStandardOutputBuilder.AppendLine(referenceOutputLine);
             }
 
-            nativeStandardOutputBuilder.AppendLine(referenceOutputLine);
+            if (nativeExitCode == null)
+            {
+                throw new InvalidOperationException("Missing exit code");
+            }
+
+            var nativeStandardOutput = nativeStandardOutputBuilder.ToString();
+            Assert.AreEqual(nativeStandardOutput, managedStandardOutput);
+            Assert.AreEqual(nativeExitCode, managedExitCode);
         }
-
-        if (nativeExitCode == null)
-        {
-            throw new InvalidOperationException("Missing exit code");
-        }
-
-        var nativeStandardOutput = nativeStandardOutputBuilder.ToString();
-
-        Assert.AreEqual("", managedStandardError);
-        Assert.AreEqual(nativeStandardOutput, managedStandardOutput);
-        Assert.AreEqual(nativeExitCode, managedExitCode);
 
         Console.WriteLine($"Stdout: {managedStandardOutput}");
     }

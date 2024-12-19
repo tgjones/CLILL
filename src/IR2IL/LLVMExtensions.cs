@@ -193,6 +193,7 @@ internal static partial class LLVMExtensions
             LLVMOpcode.LLVMCall => value.IsAIntrinsicInst != null, // TODO: Not every intrinsic has no side effects.
             LLVMOpcode.LLVMFCmp => value.GetOperand(0).HasNoSideEffects() && value.GetOperand(1).HasNoSideEffects(),
             LLVMOpcode.LLVMFDiv => value.GetOperand(0).HasNoSideEffects() && value.GetOperand(1).HasNoSideEffects(),
+            LLVMOpcode.LLVMFreeze => value.GetOperand(0).HasNoSideEffects(),
             LLVMOpcode.LLVMGetElementPtr => value.GetOperands().All(x => x.HasNoSideEffects()),
             LLVMOpcode.LLVMICmp => value.GetOperand(0).HasNoSideEffects() && value.GetOperand(1).HasNoSideEffects(),
             LLVMOpcode.LLVMInsertElement => value.GetOperands().All(x => x.HasNoSideEffects()),
