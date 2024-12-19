@@ -118,7 +118,26 @@ public partial class CompilerTests
 
             // These tests don't compile correctly on MSVC because of _Complex type differences.
             "0000_0078" or "0000_0079" or "0000_0080" or "0000_0089" or "0000_0090" or "0000_0091" => false,
-            "0000_0192" => false,
+            "0000_0192" or "0006_0000" => false,
+
+            // These tests don't run correctly on MSVC because of _Generic differences.
+            "0005_0005" => false,
+
+            // These tests don't compile correctly on MSVC because of fpclassify type differences.
+            "0005_0006" => false,
+
+            // These tests require GLIBC defines.
+            "0005_0017" or "0005_0018" or "0005_0019" or "0005_0020" or "0005_0021" or "0005_0022" => false,
+            "0005_0028" or "0005_0029" or "0005_0030" or "0005_0045" or "0005_0063" => false,
+
+            // These tests don't compile correctly on MSVC beacuse of align library differences.
+            "0005_0032" or "0005_0033" => false,
+
+            // These tests don't execute correctly on MSVC beacuse of OpenMP differences.
+            "0005_0036" => false,
+
+            // These tests don't execute correctly because quick_exit behaves differently when called from CoreCLR.
+            "0005_0040" or "0005_0041" or "0005_0042" or "0005_0043" => false,
 
             _ => true,
         }));

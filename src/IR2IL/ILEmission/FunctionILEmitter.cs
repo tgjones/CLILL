@@ -6,6 +6,7 @@ using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Text;
+using System.Threading;
 using IR2IL.Helpers;
 using IR2IL.Intrinsics;
 using IR2IL.Runtime;
@@ -233,6 +234,10 @@ internal sealed class FunctionILEmitter : ILEmitter
                 EmitBinaryOperation(instruction, OpCodes.Shr, nameof(Vector128.ShiftRightArithmetic));
                 break;
 
+            case LLVMOpcode.LLVMAtomicRMW:
+                EmitAtomicRMW(instruction);
+                break;
+
             case LLVMOpcode.LLVMBitCast:
                 EmitBitCast(instruction);
                 break;
@@ -398,6 +403,37 @@ internal sealed class FunctionILEmitter : ILEmitter
 
             default:
                 throw new NotImplementedException($"Instruction {instruction.InstructionOpcode} is not implemented: {instruction}");
+        }
+    }
+
+    private void EmitAtomicRMW(LLVMValueRef instruction)
+    {
+        var pointer = instruction.GetOperand(0);
+        var value = instruction.GetOperand(1);
+
+        switch (instruction.AtomicRMWBinOp)
+        {
+            case LLVMAtomicRMWBinOp.LLVMAtomicRMWBinOpAdd:
+                switch (value.TypeOf.Kind)
+                {
+                    case LLVMTypeKind.LLVMIntegerTypeKind:
+                        // TODO: When amount to add is constant 1 or -1, call Increment or Decrement.
+
+                        EmitValue(pointer);
+                        EmitValue(value);
+
+                        var integerType = TypeSystem.GetMsilType(value.TypeOf);
+                        var addMethod = typeof(Interlocked).GetMethodStrict(nameof(Interlocked.Add), [integerType.MakeByRefType(), integerType]);
+                        ILGenerator.Emit(OpCodes.Call, addMethod);
+                        break;
+
+                    default:
+                        throw new NotImplementedException();
+                }
+                break;
+
+            default:
+                throw new NotImplementedException($"Atomic RMW operation {instruction.AtomicRMWBinOp} not implemented: {instruction}");
         }
     }
 
@@ -1725,6 +1761,8 @@ internal sealed class FunctionILEmitter : ILEmitter
 
         EmitValue(valueRef);
         EmitLoadIndirect(instruction.TypeOf);
+
+        // TODO: Atomic load?
     }
 
     private void EmitLoadIndirect(LLVMTypeRef typeRef)
