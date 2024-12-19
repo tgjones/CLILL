@@ -1249,6 +1249,25 @@ internal sealed class FunctionILEmitter : ILEmitter
                 _ => throw new NotImplementedException($"Branch condition integer comparison {condition.ICmpPredicate} not implemented: {condition}"),
             };
         }
+        else if (CanPushToStack(condition)
+            && condition.InstructionOpcode == LLVMOpcode.LLVMFCmp
+            && condition.TypeOf.Kind == LLVMTypeKind.LLVMIntegerTypeKind)
+        {
+            EmitValue(condition.GetOperand(0));
+            EmitValue(condition.GetOperand(1));
+
+            return condition.FCmpPredicate switch
+            {
+                LLVMRealPredicate.LLVMRealOEQ => OpCodes.Beq,
+                LLVMRealPredicate.LLVMRealOGE => OpCodes.Bge,
+                LLVMRealPredicate.LLVMRealOGT => OpCodes.Bgt,
+                LLVMRealPredicate.LLVMRealOLT => OpCodes.Blt,
+                LLVMRealPredicate.LLVMRealUGE => OpCodes.Bge_Un,
+                LLVMRealPredicate.LLVMRealULT => OpCodes.Blt_Un,
+                LLVMRealPredicate.LLVMRealUNE => OpCodes.Bne_Un,
+                _ => throw new NotImplementedException($"Branch condition float comparison {condition.FCmpPredicate} not implemented: {condition}"),
+            };
+        }
         else
         {
             EmitValue(condition);
